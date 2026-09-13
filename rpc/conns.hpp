@@ -247,11 +247,11 @@ struct PeerConn<TCP> {
 
     std::byte rbuf[RESP_SIZE + sizeof(uint32_t) + sizeof(RpcKind)]{};
 
-    IPAddrPort peer_ip_addr = 0;
-
     size_t wbuf_offset      = 0;
     size_t wbuf_size        = 0;
     size_t rbuf_offset      = 0;
+
+    IPAddr peer_ip_addr = 0;
 
     NodeID peer_id          = -1;
 
@@ -267,7 +267,7 @@ struct PeerConn<TCP> {
     operator bool() {
         return fd != -1;
     }
-    PeerConn(IPAddrPort ip_addr, NodeID peer_id) : peer_ip_addr{ip_addr}, peer_id{peer_id} {}
+    PeerConn(IPAddr ip_addr, NodeID peer_id) : peer_ip_addr{ip_addr}, peer_id{peer_id} {}
     PeerConn() = default;
     ~PeerConn() {
         if (fd != -1) ::close(fd);
@@ -309,9 +309,9 @@ struct PeerConn<UDP> {
     std::byte wbuf[MAX_INFLIGHT_REQ_BYTES]{};
     std::byte rbuf[RESP_SIZE + sizeof(uint32_t) + sizeof(RpcKind)]{};
 
-    IPAddrPort peer_ip_addr = 0;
-
     size_t wbuf_size        = 0;
+
+    IPAddr peer_ip_addr     = 0;
 
     NodeID peer_id          = -1;
 
@@ -327,7 +327,7 @@ struct PeerConn<UDP> {
     operator bool() {
         return fd != -1;
     }
-    PeerConn(IPAddrPort ip_addr, NodeID peer_id) : peer_ip_addr{ip_addr}, peer_id{peer_id} {}
+    PeerConn(IPAddr ip_addr, NodeID peer_id) : peer_ip_addr{ip_addr}, peer_id{peer_id} {}
     PeerConn() = default;
     ~PeerConn() {
         if (fd != -1) ::close(fd);

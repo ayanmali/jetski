@@ -93,7 +93,7 @@ public:
     std::optional<std::string> OnHeartbeat();
     std::optional<std::string> OnFlush();
 
-    void add_peer_if_not_exists(NodeID, IPAddrPort, EventLoop<SOCKET_TYPE>&);
+    void add_peer_if_not_exists(NodeID, IPAddr, EventLoop<SOCKET_TYPE>&);
     uint32_t compute_new_commit_idx();
     void commit_entries_if_available();
 
@@ -248,13 +248,11 @@ inline std::optional<std::string> Node::CreateNode(Node* n, ELNodeInbox* el_inbo
             n->node_ids_.set_cluster_node(i);
             if (i == MY_ID) continue;
 
-            auto result = encode(init_cluster[i], SERVER_PORT);
-            if (std::holds_alternative<const char*>(result)) {
-                return std::get<const char*>(result);
-            }
-            IPAddrPort ip_addr = std::get<IPAddrPort>(result);
+            struct in_addr addr;
+            if (inet_pton(AF_INET, init_cluster[i], &addr) != 1) return "failed to encode IP address into int";
+
             std::optional<std::string> add_peer_err = n->loops_[i & (EVENT_LOOP_THREADS - 1)]
-                .AddPeer(i, ip_addr);
+                .AddPeer(i, addr.s_addr);
             if (add_peer_err) {
                 return (
                     std::format("error creating node:\n{}\n", add_peer_err.value())
@@ -588,7 +586,7 @@ inline void Node::become_leader() {
     set_timer_periodic(heartbeat_fd_, heartbeat_period_secs_, heartbeat_period_nsecs_);
 }
 
-inline void Node::add_peer_if_not_exists(NodeID node_id, IPAddrPort ip_addr, EventLoop<SOCKET_TYPE>& el) {
+inline void Node::add_peer_if_not_exists(NodeID node_id, IPAddr ip_addr, EventLoop<SOCKET_TYPE>& el) {
     if (node_ids_.is_available(node_id)) return;
 
     // The peer is unknown or was dropped earlier. (Re)establish it as a live peer.

@@ -39,8 +39,9 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 std::cout << "\n";
 
                 #endif
+                IPAddr ip_addr = (payload.client_ip_addr >> 16) & 0xFFFFFFFF;
                 auto& el = loops_[payload.leader_id & (EVENT_LOOP_THREADS - 1)];
-                add_peer_if_not_exists(payload.leader_id, payload.client_ip_addr, el);
+                add_peer_if_not_exists(payload.leader_id, ip_addr, el);
 
                 // reply false if:
                 // term < current_term
@@ -210,8 +211,9 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 }
                 std::cout << "\n";
                 #endif
+                IPAddr ip_addr = (payload.client_ip_addr >> 16) & 0xFFFFFFFF;
                 auto& el = loops_[payload.candidate_id & (EVENT_LOOP_THREADS - 1)];
-                add_peer_if_not_exists(payload.candidate_id, payload.client_ip_addr, el);
+                add_peer_if_not_exists(payload.candidate_id, ip_addr, el);
 
                 if (payload.term > current_term_) {
                     advance_to_term(payload.term);
@@ -282,8 +284,9 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 std::cout << "payload.leader_id = " << payload.leader_id << "\n";
                 std::cout << "payload.done = " << static_cast<int>(payload.done) << "\n";
                 #endif
+                IPAddr ip_addr = (payload.client_ip_addr >> 16) & 0xFFFFFFFF;
                 auto& el = loops_[payload.leader_id & (EVENT_LOOP_THREADS - 1)];
-                add_peer_if_not_exists(payload.leader_id, payload.client_ip_addr, el);
+                add_peer_if_not_exists(payload.leader_id, ip_addr, el);
 
                 if (payload.term > current_term_) {
                     advance_to_term(payload.term);
@@ -460,7 +463,6 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
 
                 if (payload.term > current_term_) {
                     advance_to_term(payload.term);
-                    leader_id_ = payload.server_id;
                     leader_contact = true;
                 }
 
@@ -592,14 +594,16 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 }
                 #endif
 
+                IPAddr ip_addr = (payload.client_ip_addr >> 16) & 0xFFFFFFFF;
+                auto& el = loops_[payload.sender_id & (EVENT_LOOP_THREADS - 1)];
+                add_peer_if_not_exists(payload.sender_id, ip_addr, el);
+
                 if (payload.term != current_term_) {
                     #ifdef DEBUG
                     std::cout << "forwarded request has a stale term = " << payload.term << "\n";
                     #endif
                     return {};
                 }
-                auto& el = loops_[payload.sender_id & (EVENT_LOOP_THREADS - 1)];
-                add_peer_if_not_exists(payload.sender_id, payload.client_ip_addr, el);
 
                 std::vector<LogEntry> entries;
                 entries.reserve(payload.entries_len);
