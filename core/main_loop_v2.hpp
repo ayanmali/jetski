@@ -694,6 +694,9 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
 
     if (leader_contact) {
         // reset timer
+        #ifdef DEBUG
+        std::cout << "received leader contact\n";
+        #endif
         reset_timer(election_timeout_fd_, election_timeout_secs_, election_timeout_nsecs_);
         demote();
     }
