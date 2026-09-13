@@ -68,7 +68,7 @@ struct EventLoop {
     std::optional<std::string> Run();
     void Stop(); // event loop can be stopped via a signal on the event fd
     void Wake();
-    std::optional<std::string> AddPeer(NodeID id, IPAddrPort ip_addr);
+    std::optional<std::string> AddPeer(NodeID id, IPAddr ip_addr);
 
     SPSCQueue<EventLoopMessage, EVENT_LOOP_INBOX_RING_CAP> outbound_inbox{};
 
@@ -394,13 +394,6 @@ inline std::optional<std::string> EventLoop<T>::DrainInbox() {
                 #ifdef DEBUG
                 std::cout << "found add peer msg\n";
                 #endif
-
-                if (!client_data.client_ip_to_conn.contains(payload.ip_addr)) {
-                    return (std::format(
-                        "Failed to add peer - ip address + port {} not present in client_conns\n",
-                        payload.ip_addr
-                    ));
-                }
 
                 std::optional<std::string> add_peer_err = AddPeer(payload.dest_id, payload.ip_addr);
                 if (add_peer_err) {

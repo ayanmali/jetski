@@ -21,15 +21,11 @@ RPC request/response payload structs.
 using NodeID = int32_t;
 using FD = int;
 using IPAddrPort = uint64_t; // 32 bit IP address left shifted by 16 bits, and 16 bit port number, both in network byte order
-inline IPAddrPort encode(uint32_t ip, uint16_t port) {
+using IPAddr = uint32_t;
+inline IPAddrPort encode(IPAddr ip, uint16_t port) {
     return (uint64_t(ip) << 16) | port;
 };
-inline std::variant<IPAddrPort, const char*> encode(const char* ip, uint16_t port) {
-    struct in_addr addr;
-    if (inet_pton(AF_INET, ip, &addr) != 1) return "failed to encode IP address and port";
-    return encode(addr.s_addr, htons(port));
-}
-inline std::pair<uint32_t, uint16_t> decode(uint64_t val) {
+inline std::pair<IPAddr, uint16_t> decode(IPAddrPort val) {
     return {
         (val >> 16) & 0xFFFFFFFF,
         val & ((1 << 16) - 1)
@@ -188,7 +184,7 @@ struct HeartbeatTimeout { NodeID source_id; };
 
 /* For supporting dynamic cluster configurations */
 struct DropPeerMsg { NodeID source_id; };
-struct AddPeerMsg { IPAddrPort ip_addr; NodeID dest_id; };
+struct AddPeerMsg { IPAddr ip_addr; NodeID dest_id; };
 struct ForwardLeaderMsg {
     std::byte entries[MAX_ENTRIES][CMD_SIZE];
     IPAddrPort client_ip_addr; // for routing purposes only; not serialized across network

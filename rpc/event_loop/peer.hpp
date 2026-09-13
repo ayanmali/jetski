@@ -27,8 +27,7 @@ inline std::optional<const char*> EventLoop<T>::modify_peer_interest(PeerConn<T>
 }
 
 template <SocketType T>
-inline std::optional<std::string> EventLoop<T>::AddPeer(NodeID id, IPAddrPort ip_addr) {
-    auto [addr, port] = decode(ip_addr);
+inline std::optional<std::string> EventLoop<T>::AddPeer(NodeID id, IPAddr ip_addr) {
     if (id >= peer_id_to_conn.size()) {
         peer_id_to_conn.resize(id + 1);
     }
@@ -57,15 +56,20 @@ inline std::optional<std::string> EventLoop<TCP>::StartConnect(PeerConn<TCP>& p)
     hints.ai_flags    = AI_NUMERICHOST | AI_NUMERICSERV;
 
     addrinfo* res = nullptr;
-    auto [ip_addr, port] = decode(p.peer_ip_addr); // stored in network byte order
-    struct in_addr addr{ .s_addr = ip_addr };
+    struct in_addr addr{ .s_addr = p.peer_ip_addr };
     char ip_addr_str[INET_ADDRSTRLEN];
     if (::inet_ntop(AF_INET, &addr, ip_addr_str, sizeof(ip_addr_str)) == nullptr) {
         return "Error converting peer IP address to string";
     }
-    std::string port_str = std::to_string(ntohs(port));
 
-    if (::getaddrinfo(ip_addr_str, port_str.c_str(), &hints, &res) != 0 || res == nullptr) {
+    char port_str[6];
+    auto [ptr, ec] = std::to_chars(port_str, port_str + sizeof(port_str) - 1, SERVER_PORT);
+    if (ec != std::errc{}) {
+         return "failed to convert server port number into string\n";
+    }
+    *ptr = '\0';
+
+    if (::getaddrinfo(ip_addr_str, port_str, &hints, &res) != 0 || res == nullptr) {
         return "Error getting address info for peer";
     }
 
@@ -155,15 +159,20 @@ inline std::optional<std::string> EventLoop<UDP>::StartConnect(PeerConn<UDP>& p)
     hints.ai_flags    = AI_NUMERICHOST | AI_NUMERICSERV;
 
     addrinfo* res = nullptr;
-    auto [ip_addr, port] = decode(p.peer_ip_addr); // stored in network byte order
-    struct in_addr addr{ .s_addr = ip_addr };
+    struct in_addr addr{ .s_addr = p.peer_ip_addr };
     char ip_addr_str[INET_ADDRSTRLEN];
     if (::inet_ntop(AF_INET, &addr, ip_addr_str, sizeof(ip_addr_str)) == nullptr) {
         return "Error converting peer IP address to string";
     }
-    std::string port_str = std::to_string(ntohs(port));
 
-    if (::getaddrinfo(ip_addr_str, port_str.c_str(), &hints, &res) != 0 || res == nullptr) {
+    char port_str[6];
+    auto [ptr, ec] = std::to_chars(port_str, port_str + sizeof(port_str) - 1, SERVER_PORT);
+    if (ec != std::errc{}) {
+         return "failed to convert server port number into string\n";
+    }
+    *ptr = '\0';
+
+    if (::getaddrinfo(ip_addr_str, port_str, &hints, &res) != 0 || res == nullptr) {
         return "Error getting address info for peer";
     }
 
