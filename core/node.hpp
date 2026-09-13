@@ -251,13 +251,12 @@ inline std::optional<std::string> Node::CreateNode(Node* n, ELNodeInbox* el_inbo
             struct in_addr addr;
             if (inet_pton(AF_INET, init_cluster[i], &addr) != 1) return "failed to encode IP address into int";
 
-            std::optional<std::string> add_peer_err = n->loops_[i & (EVENT_LOOP_THREADS - 1)]
-                .AddPeer(i, addr.s_addr);
-            if (add_peer_err) {
-                return (
-                    std::format("error creating node:\n{}\n", add_peer_err.value())
-                );
-            }
+            n->loops_[i & (EVENT_LOOP_THREADS - 1)].outbound_inbox.PushOne(
+                EventLoopMessage(
+                    AddPeerMsg{ .ip_addr = addr.s_addr, .dest_id = i }
+                )
+            );
+
             n->node_ids_.set_online_node(i);
         }
 
@@ -270,6 +269,7 @@ inline std::optional<std::string> Node::CreateNode(Node* n, ELNodeInbox* el_inbo
                 }
                 #endif
             });
+            n->loops_[i].Wake();
         }
 
         const char* mode;
