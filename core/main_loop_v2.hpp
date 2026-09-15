@@ -169,7 +169,7 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 std::cout << "i = " << i << "\n";
                 std::cout << "new log size = " << log_.size() << "\n";
                 #endif
-                std::memcpy(&log_[start], payload.entries + i, (payload.entries_len - i) * sizeof(LogEntry));
+                std::memcpy(log_.data() + start, payload.entries + i, (payload.entries_len - i) * sizeof(LogEntry));
 
                 if (log_truncated) {
                     ::freopen(LOG_FILE_PATH, "w+", log_fp_);
