@@ -179,7 +179,7 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 }
                 else {
                     ::fseek(log_fp_, 0, SEEK_END);
-                    ::fwrite(&log_[start], sizeof(LogEntry), payload.entries_len - i, log_fp_);
+                    ::fwrite(log_.data() + start, sizeof(LogEntry), payload.entries_len - i, log_fp_);
                 }
 
                 if (current_term_ != payload.term) advance_to_term(payload.term);
