@@ -164,6 +164,11 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 // append any entries not already in the log
                 size_t start = log_.size();
                 log_.resize(log_.size() + payload.entries_len - i);
+                #ifdef DEBUG
+                std::cout << "start = " << start << "\n";
+                std::cout << "i = " << i << "\n";
+                std::cout << "new log size = " << log_.size() << "\n";
+                #endif
                 std::memcpy(&log_[start], payload.entries + i, (payload.entries_len - i) * sizeof(LogEntry));
 
                 if (log_truncated) {
