@@ -17,6 +17,7 @@ Persistence:
 #include "./helpers.hpp"
 #include "../config.hpp"
 #include "../rpc/event_loop/event_loop.hpp"
+#include "../rpc/event_loop/main_loop.hpp"
 #include "../rpc/protocol/payloads.hpp"
 #include <chrono>
 #include <csignal>
@@ -41,7 +42,7 @@ Persistence:
 
 struct Node {
 public:
-    static std::optional<std::string> CreateNode(Node*, NodeInbox*, void(*)(FILE*, const LogEntry&));
+    static std::optional<std::string> CreateNode(Node*, ELNodeInbox*, ClientNodeInbox*, void(*)(FILE*, const LogEntry&));
     ~Node();
     Node()                       = default;
     Node(const Node&)            = delete;
@@ -52,7 +53,7 @@ public:
     // Signals every loop to exit, joins all worker threads.
     void Stop();
 
-    void MainLoop();
+    std::optional<std::string> MainLoop();
 
     void append_commands(std::vector<std::byte*>&);
     void append_commands(std::byte (&)[MAX_ENTRIES][CMD_SIZE], size_t num_entries);
@@ -65,14 +66,14 @@ public:
     // TODO: replace AoS EventLoop w/ SoA pattern
     private:
     template <typename T>
-    void send(T&& payload, EventLoop& el) {
+    void send(T&& payload, EventLoop<SOCKET_TYPE>& el) {
         el.outbound_inbox.PushOne(
             EventLoopMessage(std::forward<T>(payload))
         );
         el.Wake();
     }
-    std::optional<std::string> send_append_entries(int32_t next_idx, EventLoop&, NodeID);
-    std::optional<std::string> send_install_snapshot(EventLoop&, NodeID);
+    std::optional<std::string> send_append_entries(int32_t next_idx, EventLoop<SOCKET_TYPE>&, NodeID);
+    std::optional<std::string> send_install_snapshot(EventLoop<SOCKET_TYPE>&, NodeID);
     void request_votes();
 
     void append_commands_local(std::vector<LogEntry>&&);
@@ -82,7 +83,7 @@ public:
     void become_leader();
     void advance_to_term(uint32_t);
 
-    void add_peer_if_not_exists(NodeID, FD, EventLoop&);
+    void add_peer_if_not_exists(NodeID, IPAddrPort, EventLoop<SOCKET_TYPE>&);
     uint32_t compute_new_commit_idx();
     void commit_entries_if_available();
 
@@ -112,14 +113,15 @@ public:
     std::vector<int32_t>                                            match_indexes_           = std::vector<int32_t>(BASE_CLUSTER_SIZE, 0);         // leader-only, one per peer
     NodeBitset                                                      node_ids_                = NodeBitset(BASE_CLUSTER_SIZE);
 
-    std::array<EventLoop, EVENT_LOOP_THREADS>                       loops_{};
-    std::array<std::thread, EVENT_LOOP_THREADS>                     threads_;
+    std::array<EventLoop<SOCKET_TYPE>, EVENT_LOOP_THREADS>          loops_{};
+    std::array<std::jthread, EVENT_LOOP_THREADS>                    threads_;
 
     std::chrono::steady_clock::time_point                           last_leader_contact_;
     std::chrono::steady_clock::time_point                           last_flush_;
     std::chrono::milliseconds                                       election_timeout_;     // Election timeout, randomized at construction.
     std::uniform_int_distribution<>                                 distrib_                 = std::uniform_int_distribution<>(MIN_ELECTION_TIMEOUT_MS, MAX_ELECTION_TIMEOUT_MS);
-    NodeInbox*                                                      inbox_;
+    ELNodeInbox*                                                    el_inbox_;
+    ClientNodeInbox*                                                client_inbox_;
     FILE*                                                           log_fp_                  = nullptr;
     FILE*                                                           snapshot_fp_             = nullptr;
     FILE*                                                           snapshot_tmp_fp_         = nullptr;
@@ -140,14 +142,15 @@ public:
 
 // Factory function
 // Node requires stable addresses (i.e. not movable)
-inline std::optional<std::string> Node::CreateNode(Node* n, NodeInbox* inbox,
+inline std::optional<std::string> Node::CreateNode(Node* n, ELNodeInbox* el_inbox, ClientNodeInbox* client_inbox,
     void(*apply_entry_to_sm)(FILE*, const LogEntry&)) {
     static_assert(EVENT_LOOP_THREADS > 0 && (EVENT_LOOP_THREADS & (EVENT_LOOP_THREADS - 1)) == 0,
         "Node: EVENT_LOOP_THREADS must be a power of 2 (MPSC inbox requires it)");
     static_assert(SNAPSHOT_CHUNK_SIZE >= MAX_CLUSTER_HEADER_SIZE,
         "Node: SNAPSHOT_CHUNK_SIZE must be at least as large as MAX_CLUSTER_HEADER_SIZE (determined by MAX_NODES)");
 
-    n->inbox_ = inbox;
+    n->el_inbox_ = el_inbox;
+    n->client_inbox_ = client_inbox;
     n->apply_entry = apply_entry_to_sm;
 
     // SIGPIPE would otherwise kill the process if a peer disappears
@@ -167,30 +170,19 @@ inline std::optional<std::string> Node::CreateNode(Node* n, NodeInbox* inbox,
     std::cout << "election timeout set to " << n->election_timeout_ << "\n";
     #endif
 
+    constexpr uint num_peers_init = (BASE_CLUSTER_SIZE / EVENT_LOOP_THREADS) + 1;
+
     for (uint i = 0; i < EVENT_LOOP_THREADS; ++i) {
-        std::optional<std::string> create_el_err = EventLoop::CreateEventLoop(
-            &n->loops_[i], inbox, i, HEARTBEAT_INTERVAL_MS, RPC_TIMEOUT_MS
+        std::optional<std::string> create_el_err = EventLoop<SOCKET_TYPE>::CreateEventLoop(
+            &n->loops_[i], el_inbox, i, num_peers_init, HEARTBEAT_INTERVAL_MS, RPC_TIMEOUT_MS
         );
         if (create_el_err) {
             return (
                 std::format("error creating event loop {}:\n{}\n", i, create_el_err.value())
             );
         }
-
-        n->threads_[i] = std::thread([n, i] {
-            std::optional<std::string> loop_err = n->loops_[i].Run();
-            // #ifdef DEBUG
-            // std::cout << "event loop " << i << " crashed:\n" << loop_err.value() << "\n";
-            // #endif
-        });
     }
 
-
-    // init_peers is identical on every node in the cluster, so a peer's
-    // index in this array IS its globally consistent NodeID. Each node lists
-    // itself at index MY_ID using the placeholder "" in place of its own IP;
-    // we skip that slot (the loop counter still advances so peer indices stay
-    // aligned with their array positions).
     const char* init_cluster[BASE_CLUSTER_SIZE];
     setup_peers(init_cluster);
     //static_assert(static_cast<size_t>(MY_ID) < BASE_CLUSTER_SIZE, "This node's ID exceeds the cluster size");
@@ -198,14 +190,29 @@ inline std::optional<std::string> Node::CreateNode(Node* n, NodeInbox* inbox,
     for (int i = 0; i < BASE_CLUSTER_SIZE; ++i) {
         n->node_ids_.set_cluster_node(i);
         if (i == MY_ID) continue;
+
+        auto result = encode(init_cluster[i], SERVER_PORT);
+        if (std::holds_alternative<const char*>(result)) {
+            return std::get<const char*>(result);
+        }
+        IPAddrPort ip_addr = std::get<IPAddrPort>(result);
         std::optional<std::string> add_peer_err = n->loops_[i & (EVENT_LOOP_THREADS - 1)]
-            .AddPeer(i, init_cluster[i], SERVER_PORT);
+            .AddPeer(i, ip_addr);
         if (add_peer_err) {
             return (
                 std::format("error creating node:\n{}\n", add_peer_err.value())
             );
         }
         n->node_ids_.set_online_node(i);
+    }
+
+    for (uint i = 0; i < EVENT_LOOP_THREADS; ++i) {
+        n->threads_[i] = std::jthread([n, i] {
+            std::optional<std::string> loop_err = n->loops_[i].Run();
+            #ifdef DEBUG
+            std::cout << "event loop " << i << " crashed:\n" << loop_err.value() << "\n";
+            #endif
+        });
     }
 
     const char* mode;
@@ -254,7 +261,7 @@ inline Node::~Node() {
         if (threads_[i].joinable()) threads_[i].join();
     }
 
-    ::fclose(log_fp_);
+    if (log_fp_ != nullptr) ::fclose(log_fp_);
     if (snapshot_fp_ != nullptr) ::fclose(snapshot_fp_);
     if (snapshot_tmp_fp_ != nullptr) ::fclose(snapshot_tmp_fp_);
 }
@@ -262,7 +269,7 @@ inline Node::~Node() {
 inline void Node::Stop() {
     bool done = false;
     while (!done) {
-        done = inbox_->Push(0, StopNodeMsg{});
+        done = client_inbox_->PushOne(StopNodeMsg{});
     }
 }
 
@@ -296,7 +303,7 @@ inline void Node::append_commands(std::vector<std::byte*>& commands) {
     }
     bool done = false;
     while (!done) {
-        inbox_->Push(0, NodeMessage{AppendClientReq{std::move(entries)}});
+        done = client_inbox_->PushOne(AppendClientReq{std::move(entries)});
     }
 }
 
@@ -308,14 +315,14 @@ inline void Node::append_commands(std::byte (&commands)[MAX_ENTRIES][CMD_SIZE], 
     }
     bool done = false;
     while (!done) {
-        inbox_->Push(0, NodeMessage{AppendClientReq{std::move(entries)}});
+        done = client_inbox_->PushOne(AppendClientReq{std::move(entries)});
     }
 }
 
 inline void Node::append_commands(std::vector<LogEntry>&& commands) {
     bool done = false;
     while (!done) {
-        inbox_->Push(0, NodeMessage{AppendClientReq{std::move(commands)}});
+        done = client_inbox_->PushOne(AppendClientReq{std::move(commands)});
     }
 }
 
@@ -395,7 +402,7 @@ inline void Node::read_state(FILE* out) {
     #endif
     bool done = false;
     while (!done) {
-        inbox_->Push(0, ReadStateClientReq{out});
+        done = client_inbox_->PushOne(ReadStateClientReq{out});
     }
 }
 
@@ -503,7 +510,7 @@ inline void Node::become_leader() {
     for (auto& loop : loops_) { loop.Wake(); }
 }
 
-inline void Node::add_peer_if_not_exists(NodeID node_id, FD fd, EventLoop& el) {
+inline void Node::add_peer_if_not_exists(NodeID node_id, IPAddrPort ip_addr, EventLoop<SOCKET_TYPE>& el) {
     if (node_ids_.is_available(node_id)) return;
 
     // The peer is unknown or was dropped earlier. (Re)establish it as a live peer.
@@ -523,7 +530,7 @@ inline void Node::add_peer_if_not_exists(NodeID node_id, FD fd, EventLoop& el) {
 
     el.outbound_inbox.PushOne(
         EventLoopMessage(
-            AddPeerMsg{ .fd = fd, .port = SERVER_PORT, .dest_id = node_id }
+            AddPeerMsg{ .ip_addr = ip_addr, .dest_id = node_id }
         )
     );
 
@@ -552,15 +559,15 @@ inline uint32_t Node::compute_new_commit_idx() {
     const size_t majority = (node_ids_.num_in_cluster - 1) / 2;
 
     // every member's last-known match index; self is always last_log_idx
-    std::vector<int> matches{};
-    matches.reserve(match_indexes_.size() + 1);
+    std::array<int, MAX_NODES> matches{};
+    int idx = 0;
     for (int m : match_indexes_) {
         if (m < 0) continue;
-        matches.push_back(m);
+        matches[idx++] = m;
     }
-    matches.push_back(last_log_idx);
-    if (majority >= matches.size()) return commit_index_;
-    std::nth_element(matches.begin(), matches.begin() + majority, matches.end());
+    matches[idx++] = last_log_idx;
+    if (majority >= idx) return commit_index_;
+    std::nth_element(matches.begin(), matches.begin() + majority, matches.begin() + idx);
 
     #ifdef DEBUG
     std::cout << "Matches:\n";
@@ -829,13 +836,16 @@ inline void Node::flush_files() {
     last_flush_ = std::chrono::steady_clock::now();
 }
 
-inline std::optional<std::string> Node::send_append_entries(int32_t next_idx, EventLoop& el, NodeID dest_id) {
+inline std::optional<std::string> Node::send_append_entries(int32_t next_idx, EventLoop<SOCKET_TYPE>& el, NodeID dest_id) {
     #ifdef DEBUG
     std::cout << "checking for entries to send to node " << dest_id << "\n";
     std::cout << "next index = " << next_idx << "\n";
     std::cout << "base logical idx = " << base_logical_idx_ << "\n";
     std::cout << "log_.size() == " << log_.size() << "\n";
     #endif
+    if (next_idx <= 0) {
+        return {};
+    }
     // Only send entries when the log actually has some at/after
     // next_idx. log_.size()-1 >= next_idx is restated as
     // next_idx < log_.size() to avoid uint underflow on size 0.
@@ -900,7 +910,7 @@ inline size_t Node::snapshot_config_and_data_offset_bytes() const {
     return sizeof(last_applied_idx_) + sizeof(last_applied_term_);
 }
 
-inline std::optional<std::string> Node::send_install_snapshot(EventLoop& el, NodeID dest_id) {
+inline std::optional<std::string> Node::send_install_snapshot(EventLoop<SOCKET_TYPE>& el, NodeID dest_id) {
     #ifdef DEBUG
     std::cout << "Sending InstallSnapshot RPC:\n";
     std::cout << "term = " << current_term_ << "\n";

@@ -1,19 +1,40 @@
 #pragma once
 #include "./event_loop.hpp"
 #include "../protocol/utils.hpp"
-#include <arpa/inet.h>
 #include <format>
+#include <arpa/inet.h>
 #include <netinet/tcp.h>
 
 #ifdef DEBUG
 #include <iostream>
 #endif
 
-inline std::optional<const char*> EventLoop::modify_client_interest(ClientConn* c, uint32_t events) {
+template <>
+inline void EventLoop<TCP>::CloseClient(ClientConn<TCP>* c) {
+    #ifdef DEBUG
+    std::cout << "closing client with ip " << c->client_ip_addr << "\n";
+    #endif
+    if (c->closing) return;
+    c->closing = true;
+
+    if (c->fd >= 0) {
+        ::epoll_ctl(epoll_fd, EPOLL_CTL_DEL, c->fd, nullptr);
+        ::close(c->fd);
+        client_data.client_fd_to_ip.erase(c->fd);
+        client_data.client_ip_to_conn.erase(c->client_ip_addr);
+    }
+
+    client_slab.Release(c);
+    //if (c.pending_tasks == 0) ReapClient(c);
+}
+
+template <>
+inline std::optional<const char*> EventLoop<TCP>::modify_client_interest(ClientConn<TCP>* c, uint32_t events) {
     if (c->epoll_events == events) return {};
     epoll_event ev{};
     ev.events  = events;
-    ev.data.fd = c->fd;
+    ev.data.u64 = (static_cast<uint64_t>(EpollContextKind::Client) << 56)
+                |  static_cast<uint64_t>(c->fd);
     if (::epoll_ctl(epoll_fd, EPOLL_CTL_MOD, c->fd, &ev) < 0) {
         CloseClient(c);
         return "Error modifying events for client fd";
@@ -22,11 +43,23 @@ inline std::optional<const char*> EventLoop::modify_client_interest(ClientConn* 
     return {};
 }
 
-inline std::optional<const char*> EventLoop::Accept() {
-    for (;;) {
-        ClientConn* c = client_slab.Acquire();
-        if (!c) continue;
+template <>
+inline std::optional<const char*> EventLoop<UDP>::modify_listener_interest(uint32_t events) {
+    if (listen_epoll_events == events) return {};
+    epoll_event ev{};
+    ev.events  = events;
+    ev.data.u64 = (static_cast<uint64_t>(EpollContextKind::Listen) << 56)
+                |  static_cast<uint64_t>(listen_fd);
+    if (::epoll_ctl(epoll_fd, EPOLL_CTL_MOD, listen_fd, &ev) < 0) {
+        return "Error modifying events for listen fd";
+    }
+    listen_epoll_events = events;
+    return {};
+}
 
+template <>
+inline std::optional<const char*> EventLoop<TCP>::Accept() {
+    for (int i = 0; i < MAX_ATTEMPTS; ++i) {
         sockaddr_in peer{};
         socklen_t   plen = sizeof(peer);
         FD fd = ::accept4(listen_fd, reinterpret_cast<sockaddr*>(&peer),
@@ -37,8 +70,14 @@ inline std::optional<const char*> EventLoop::Accept() {
             return {}; // transient errors: drop and try again on next epoll wake
         }
 
+        ClientConn<TCP>* c = client_slab.Acquire();
+        if (!c) {
+            ::close(fd);
+            return {}; // TODO: handle the case where a connection cannot be acquired
+        };
+
         // populate client ip address
-        inet_ntop(AF_INET, &peer.sin_addr, c->client_ip_addr, sizeof(c->client_ip_addr));
+        c->client_ip_addr = encode(peer.sin_addr.s_addr, peer.sin_port);
 
         #ifdef DEBUG
         std::cout << "connection accepted from node w/ IP address " << c->client_ip_addr << "\n";
@@ -50,7 +89,7 @@ inline std::optional<const char*> EventLoop::Accept() {
         c->fd = fd;
         c->epoll_events = EPOLLIN | EPOLLRDHUP | EPOLLET;
 
-        std::optional<const char*> client_fd_err = register_fd(fd, c->epoll_events);
+        std::optional<const char*> client_fd_err = register_fd(fd, c->epoll_events, EpollContextKind::Client);
         if (client_fd_err) {
             #ifdef DEBUG
             std::cout << "error accepting client connection:\n" << client_fd_err.value() << "\n";
@@ -59,12 +98,15 @@ inline std::optional<const char*> EventLoop::Accept() {
             client_slab.Release(c);
             continue;
         }
-        client_conns[c->fd] = c;
+
+        client_data.client_fd_to_ip[c->fd] = c->client_ip_addr;
+        client_data.client_ip_to_conn[c->client_ip_addr] = c;
     }
     return {};
 }
 
-inline std::optional<const char*> EventLoop::OnClientWritable(ClientConn* c) {
+template <>
+inline std::optional<const char*> EventLoop<TCP>::OnClientWritable(ClientConn<TCP>* c) {
     #ifdef DEBUG
     std::cout << "client with ip " << c->client_ip_addr << " writable\n";
     #endif
@@ -85,21 +127,18 @@ inline std::optional<const char*> EventLoop::OnClientWritable(ClientConn* c) {
     }
     std::memset(c->wbuf, 0, c->wbuf_size);
     c->wbuf_offset = 0;
+    c->wbuf_size = 0;
     std::optional<const char*> modify_err = modify_client_interest(c, c->epoll_events & ~EPOLLOUT);
     if (modify_err) {
         #ifdef DEBUG
         std::cout << modify_err.value() << "\n";
         #endif
     }
-    // if (c.closing && c.pending_tasks == 0) ReapClient(c);
-    if (c->closing) {
-        client_conns.erase(c->fd);
-        client_slab.Release(c);
-    }
     return modify_err;
 }
 
-inline std::optional<const char*> EventLoop::OnClientReadable(ClientConn* c) {
+template <>
+inline std::optional<const char*> EventLoop<TCP>::OnClientReadable(ClientConn<TCP>* c) {
     // TODO: if latency is too high here, replace c.rbuf w a ring buffer, or use readv
     #ifdef DEBUG
     std::cout << "client with ip " << c->client_ip_addr << " readable\n";
@@ -123,7 +162,7 @@ inline std::optional<const char*> EventLoop::OnClientReadable(ClientConn* c) {
     size_t parsed = 0;
     while (!c->closing && end - parsed >= sizeof(uint32_t)) {
         #ifdef DEBUG
-        std::cout << "reading request" << "\n";
+        std::cout << "reading request\n";
         #endif
 
         uint32_t net_len;
@@ -153,97 +192,137 @@ inline std::optional<const char*> EventLoop::OnClientReadable(ClientConn* c) {
     return {};
 }
 
-inline void EventLoop::CloseClient(ClientConn* c) {
-    #ifdef DEBUG
-    std::cout << "closing client with ip " << c->client_ip_addr << "\n";
-    #endif
-    if (c->closing) return;
-    c->closing = true;
-
-    if (c->fd >= 0) {
-        ::epoll_ctl(epoll_fd, EPOLL_CTL_DEL, c->fd, nullptr);
-        ::close(c->fd);
-        client_conns.erase(c->fd);
+template <SocketType T>
+inline std::optional<std::string> EventLoop<T>::post_reply(AppendEntriesRespPayload& payload) {
+    if (!client_data.client_ip_to_conn.contains(payload.client_ip_addr)) {
+        return std::format(
+            "failed to post AE reply: payload IP + port token {} not found in client connections map",
+            payload.client_ip_addr
+        );
     }
+    ClientConn<T>* c = client_data.client_ip_to_conn[payload.client_ip_addr];
 
-    client_slab.Release(c);
-    //if (c.pending_tasks == 0) ReapClient(c);
-}
-
-inline std::optional<std::string> EventLoop::post_reply(AppendEntriesRespPayload& payload) {
-    auto it = client_conns.find(payload.client_fd);
-    if (it == client_conns.end()) {
-        return std::format("client fd {} not found\n", payload.client_fd);
-    } // message gets dropped
-    ClientConn* c = it->second;
     #ifdef DEBUG
     std::cout << "posting AE reply to outbound queue to node w/ ip " << c->client_ip_addr << "\n";
     #endif
-    //++c.pending_tasks;
 
-    c->wbuf_size = payload.size() + sizeof(uint32_t) + sizeof(RpcKind);
-    BufByteWriter writer{c->wbuf};
-    writer.serialize(payload);
-
-    if (c->wbuf_offset < c->wbuf_size) {
-        std::optional<const char*> modify_err = modify_client_interest(c, c->epoll_events | EPOLLOUT);
-        if (modify_err) {
-            return modify_err.value();
+    if constexpr (T == TCP) {
+        if (c->wbuf_offset > 0) {
+            std::memmove(c->wbuf, c->wbuf + c->wbuf_offset, c->wbuf_size - c->wbuf_offset);
+            c->wbuf_size -= c->wbuf_offset;
+            c->wbuf_offset = 0;
         }
-        Wake();
     }
+
+    auto total_size = payload.size() + sizeof(uint32_t) + sizeof(RpcKind);
+    if (sizeof(c->wbuf) - c->wbuf_size < total_size) {
+        return {}; // TODO: handle the case where the ClientConn's write buffer is full
+    }
+
+    BufByteWriter writer{c->wbuf + c->wbuf_size};
+    writer.serialize(payload);
+    c->wbuf_size += total_size;
+
+    std::optional<const char*> modify_err;
+    if constexpr (T == TCP) {
+        modify_err = modify_client_interest(c, c->epoll_events | EPOLLOUT);
+    }
+    if constexpr (T == UDP) {
+        modify_err = modify_listener_interest(listen_epoll_events | EPOLLOUT);
+    }
+    if (modify_err) {
+        return modify_err.value();
+    }
+    Wake();
     return {};
 }
 
-inline std::optional<std::string> EventLoop::post_reply(RequestVoteRespPayload& payload) {
-    auto it = client_conns.find(payload.client_fd);
-    if (it == client_conns.end()) {
-        return std::format("client id {} not found\n", payload.client_fd);
-    } // message gets dropped
-    ClientConn* c = it->second;
+template <SocketType T>
+inline std::optional<std::string> EventLoop<T>::post_reply(RequestVoteRespPayload& payload) {
+    if (!client_data.client_ip_to_conn.contains(payload.client_ip_addr)) {
+        return std::format(
+            "failed to post RV reply: payload IP + port token {} not found in client connections map",
+            payload.client_ip_addr
+        );
+    }
+    ClientConn<T>* c = client_data.client_ip_to_conn[payload.client_ip_addr];
+
     #ifdef DEBUG
     std::cout << "posting RV reply to outbound queue to node w/ ip " << c->client_ip_addr << "\n";
     #endif
-    //++c.pending_tasks;
 
-    c->wbuf_size = payload.size() + sizeof(uint32_t) + sizeof(RpcKind);
-    BufByteWriter writer{c->wbuf};
-    writer.serialize(payload);
-
-    #ifdef DEBUG
-    std::cout << "wbuf offset = " << c->wbuf_offset << ", wbuf size = " << sizeof(c->wbuf) << "\n";
-    #endif
-    if (c->wbuf_offset < c->wbuf_size) {
-        std::optional<const char*> modify_err = modify_client_interest(c, c->epoll_events | EPOLLOUT);
-        if (modify_err) {
-            return modify_err.value();
+    if constexpr (T == TCP) {
+        if (c->wbuf_offset > 0) {
+            std::memmove(c->wbuf, c->wbuf + c->wbuf_offset, c->wbuf_size - c->wbuf_offset);
+            c->wbuf_size -= c->wbuf_offset;
+            c->wbuf_offset = 0;
         }
-        Wake();
     }
+
+    auto total_size = payload.size() + sizeof(uint32_t) + sizeof(RpcKind);
+    if (sizeof(c->wbuf) - c->wbuf_size < total_size) {
+        return {}; // TODO: handle the case where the ClientConn's write buffer is full;
+    }
+
+    BufByteWriter writer{c->wbuf + c->wbuf_size};
+    writer.serialize(payload);
+    c->wbuf_size += total_size;
+
+    std::optional<const char*> modify_err;
+    if constexpr (T == TCP) {
+        modify_err = modify_client_interest(c, c->epoll_events | EPOLLOUT);
+    }
+    if constexpr (T == UDP) {
+        modify_err = modify_listener_interest(listen_epoll_events | EPOLLOUT);
+    }
+    if (modify_err) {
+        return modify_err.value();
+    }
+    Wake();
     return {};
 }
 
-inline std::optional<std::string> EventLoop::post_reply(InstallSnapshotRespPayload& payload) {
-    auto it = client_conns.find(payload.client_fd);
-    if (it == client_conns.end()) {
-        return std::format("client id {} not found\n", payload.client_fd);
-    } // message gets dropped
-    ClientConn* c = it->second;
+template <SocketType T>
+inline std::optional<std::string> EventLoop<T>::post_reply(InstallSnapshotRespPayload& payload) {
+    if (!client_data.client_ip_to_conn.contains(payload.client_ip_addr)) {
+        return std::format(
+            "failed to post IS reply: payload IP + port token {} not found in client connections map",
+            payload.client_ip_addr
+        );
+    }
+    ClientConn<T>* c = client_data.client_ip_to_conn[payload.client_ip_addr];
+
     #ifdef DEBUG
     std::cout << "posting IS reply to outbound queue to node w/ ip " << c->client_ip_addr << "\n";
     #endif
-    //++c.pending_tasks;
 
-    c->wbuf_size = payload.size() + sizeof(uint32_t) + sizeof(RpcKind);
-    BufByteWriter writer{c->wbuf};
-    writer.serialize(payload);
-
-    if (c->wbuf_offset < c->wbuf_size) {
-        std::optional<const char*> modify_err = modify_client_interest(c, c->epoll_events | EPOLLOUT);
-        if (modify_err) {
-            return modify_err.value();
+    if constexpr (T == TCP) {
+        if (c->wbuf_offset > 0) {
+            std::memmove(c->wbuf, c->wbuf + c->wbuf_offset, c->wbuf_size - c->wbuf_offset);
+            c->wbuf_size -= c->wbuf_offset;
+            c->wbuf_offset = 0;
         }
-        Wake();
     }
+
+    auto total_size = payload.size() + sizeof(uint32_t) + sizeof(RpcKind);
+    if (sizeof(c->wbuf) - c->wbuf_size < total_size) {
+        return {}; // TODO: handle the case where the ClientConn's write buffer is full
+    }
+
+    BufByteWriter writer{c->wbuf + c->wbuf_size};
+    writer.serialize(payload);
+    c->wbuf_size += total_size;
+
+    std::optional<const char*> modify_err;
+    if constexpr (T == TCP) {
+        modify_err = modify_client_interest(c, c->epoll_events | EPOLLOUT);
+    }
+    if constexpr (T == UDP) {
+        modify_err = modify_listener_interest(listen_epoll_events | EPOLLOUT);
+    }
+    if (modify_err) {
+        return modify_err.value();
+    }
+    Wake();
     return {};
 }

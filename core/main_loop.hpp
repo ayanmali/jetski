@@ -7,7 +7,7 @@
 #include <chrono>
 #endif
 
-inline void Node::MainLoop() {
+inline std::optional<std::string> Node::MainLoop() {
     #ifdef DEBUG
     std::cout << "starting node loop (main thread)\n";
     #endif
@@ -22,7 +22,7 @@ inline void Node::MainLoop() {
         }
         // check the reply inbox for new replies that have arrived
         bool leader_contact{false};
-        inbox_->DrainAll([this, &leader_contact](NodeMessage&& message) {
+        el_inbox_->DrainAll([this, &leader_contact](NodeMessage&& message) {
             #ifdef DEBUG
             std::cout << "draining node inbox...\n";
             #endif
@@ -57,7 +57,7 @@ inline void Node::MainLoop() {
 
                     #endif
                     auto& el = loops_[payload.leader_id & (EVENT_LOOP_THREADS - 1)];
-                    add_peer_if_not_exists(payload.leader_id, payload.fd, el);
+                    add_peer_if_not_exists(payload.leader_id, payload.client_ip_addr, el);
 
                     // reply false if:
                     // term < current_term
@@ -70,7 +70,7 @@ inline void Node::MainLoop() {
                         #endif
                         send(AppendEntriesRespPayload{
                             .entries_len = 0,
-                            .client_fd = payload.fd,
+                            .client_ip_addr = payload.client_ip_addr,
                             .server_id = MY_ID,
                             .prev_log_idx = payload.prev_log_idx,
                             .term = current_term_,
@@ -84,7 +84,7 @@ inline void Node::MainLoop() {
                         #endif
                         send(AppendEntriesRespPayload{
                             .entries_len = 0,
-                            .client_fd = payload.fd,
+                            .client_ip_addr = payload.client_ip_addr,
                             .server_id = MY_ID,
                             .prev_log_idx = payload.prev_log_idx,
                             .term = current_term_,
@@ -99,7 +99,7 @@ inline void Node::MainLoop() {
                             #endif
                             send(AppendEntriesRespPayload{
                                 .entries_len = 0,
-                                .client_fd = payload.fd,
+                                .client_ip_addr = payload.client_ip_addr,
                                 .server_id = MY_ID,
                                 .prev_log_idx = payload.prev_log_idx,
                                 .term = current_term_,
@@ -118,7 +118,7 @@ inline void Node::MainLoop() {
                             #endif
                             send(AppendEntriesRespPayload{
                                 .entries_len = 0,
-                                .client_fd = payload.fd,
+                                .client_ip_addr = payload.client_ip_addr,
                                 .server_id = MY_ID,
                                 .prev_log_idx = payload.prev_log_idx,
                                 .term = current_term_,
@@ -126,6 +126,8 @@ inline void Node::MainLoop() {
                             return {};
                         }
                     }
+
+                    flush_files();
 
                     if (payload.leader_commit > commit_index_) {
                         commit_index_ = std::min(payload.leader_commit, static_cast<uint32_t>(payload.prev_log_idx + payload.entries_len));
@@ -141,7 +143,7 @@ inline void Node::MainLoop() {
                         #endif
                         send(AppendEntriesRespPayload{
                             .entries_len = payload.entries_len,
-                            .client_fd = payload.fd,
+                            .client_ip_addr = payload.client_ip_addr,
                             .server_id = MY_ID,
                             .prev_log_idx = payload.prev_log_idx,
                             .term = current_term_,
@@ -200,7 +202,7 @@ inline void Node::MainLoop() {
                     #endif
                     send(AppendEntriesRespPayload{
                         .entries_len = payload.entries_len,
-                        .client_fd = payload.fd,
+                        .client_ip_addr = payload.client_ip_addr,
                         .server_id = MY_ID,
                         .prev_log_idx = payload.prev_log_idx,
                         .term = current_term_,
@@ -210,11 +212,7 @@ inline void Node::MainLoop() {
                 else if constexpr (std::is_same_v<T, RequestVoteReqPayload>) {
                     #ifdef DEBUG
                     std::cout << "found RV RPC from node " << payload.candidate_id << "\n";
-                    #endif
-                    auto& el = loops_[payload.candidate_id & (EVENT_LOOP_THREADS - 1)];
-                    add_peer_if_not_exists(payload.candidate_id, payload.fd, el);
 
-                    #ifdef DEBUG
                     print_cluster();
 
                     std::cout << "Current state = " << static_cast<int>(state_) << "\n";
@@ -228,13 +226,15 @@ inline void Node::MainLoop() {
                         std::cout << v << ", ";
                     }
                     std::cout << "\n";
-
                     #endif
+                    auto& el = loops_[payload.candidate_id & (EVENT_LOOP_THREADS - 1)];
+                    add_peer_if_not_exists(payload.candidate_id, payload.client_ip_addr, el);
 
                     if (payload.term > current_term_) {
                         advance_to_term(payload.term);
-                        leader_id_ = payload.candidate_id;
-                        leader_contact = true;
+                        leader_id_ = -1;
+                        // leader_id_ = payload.candidate_id;
+                        // leader_contact = true;
                     }
 
                     if (payload.term < current_term_) {
@@ -242,12 +242,13 @@ inline void Node::MainLoop() {
                         std::cout << "rejecting RV from node " << payload.candidate_id << "\n";
                         #endif
                         send(RequestVoteRespPayload{
-                            .client_fd = payload.fd,
+                            .client_ip_addr = payload.client_ip_addr,
                             .server_id = MY_ID,
                             .term = current_term_,
                             .vote_granted = 0}, el);
                         return {};
                     }
+                    flush_files();
 
                     const uint32_t last_log_idx = static_cast<uint32_t>(log_.size() - 1) + base_logical_idx_; // logical index
                     const uint32_t last_log_term = log_.empty() ? base_term_ : log_.back().term;
@@ -263,7 +264,7 @@ inline void Node::MainLoop() {
                         voted_for_ = payload.candidate_id;
                         write_voted_for();
                         send(RequestVoteRespPayload{
-                            .client_fd = payload.fd,
+                            .client_ip_addr = payload.client_ip_addr,
                             .server_id = MY_ID,
                             .term = current_term_,
                             .vote_granted = 1}, el);
@@ -279,7 +280,7 @@ inline void Node::MainLoop() {
                     std::cout << "(default) rejecting RV from node " << payload.candidate_id << "\n";
                     #endif
                     send(RequestVoteRespPayload{
-                        .client_fd = payload.fd,
+                        .client_ip_addr = payload.client_ip_addr,
                         .server_id = MY_ID,
                         .term = current_term_,
                         .vote_granted = 0}, el);
@@ -298,7 +299,7 @@ inline void Node::MainLoop() {
                     std::cout << "payload.done = " << static_cast<int>(payload.done) << "\n";
                     #endif
                     auto& el = loops_[payload.leader_id & (EVENT_LOOP_THREADS - 1)];
-                    add_peer_if_not_exists(payload.leader_id, payload.fd, el);
+                    add_peer_if_not_exists(payload.leader_id, payload.client_ip_addr, el);
 
                     if (payload.term > current_term_) {
                         advance_to_term(payload.term);
@@ -322,7 +323,7 @@ inline void Node::MainLoop() {
                     std::cout << "accepting snapshot chunk\n";
                     #endif
                     send(InstallSnapshotRespPayload{
-                        .client_fd = payload.fd,
+                        .client_ip_addr = payload.client_ip_addr,
                         .server_id = MY_ID,
                         .term = current_term_}, el);
 
@@ -403,11 +404,15 @@ inline void Node::MainLoop() {
                     std::cout << "\n";
                     #endif
 
-                    if (payload.term > current_term_) {
-                        advance_to_term(payload.term);
-                        leader_id_ = payload.server_id;
-                        leader_contact = true;
+                    if (payload.server_id < 0 || payload.server_id >= node_ids_.bits()) {
                         return {};
+                    }
+
+                    if (payload.term > current_term_) { // this shouldn't happen
+                        advance_to_term(payload.term);
+                        // leader_id_ = payload.server_id;
+                        // leader_contact = true;
+                        // return {};
                     }
 
                     if (payload.success == 1) {
@@ -426,13 +431,15 @@ inline void Node::MainLoop() {
                     //     ));
                     // }
 
-                    next_indexes_[payload.server_id] = payload.prev_log_idx;
-                    if (payload.prev_log_idx < 1) {
+                    const uint32_t last_log_idx = static_cast<uint32_t>(log_.size() - 1) + base_logical_idx_;
+                    if (payload.prev_log_idx < 1 || payload.prev_log_idx > last_log_idx) {
                         return (std::format(
                             "Failed to retry AE RPC: next_index {} for server id {} already at the snapshot boundary",
                             payload.prev_log_idx, payload.server_id
                         ));
                     }
+                    next_indexes_[payload.server_id] = payload.prev_log_idx;
+
                     auto& el = loops_[payload.server_id & (EVENT_LOOP_THREADS - 1)];
 
                     if (payload.prev_log_idx < base_logical_idx_) {
@@ -496,6 +503,9 @@ inline void Node::MainLoop() {
                     std::cout << "found IS reply from node " << payload.server_id << "\n";
                     std::cout << "payload.term = " << payload.term << "\n";
                     #endif
+                    if (payload.server_id < 0 || payload.server_id >= node_ids_.bits()) {
+                        return {};
+                    }
 
                     if (payload.term > current_term_) {
                         advance_to_term(payload.term);
@@ -605,7 +615,7 @@ inline void Node::MainLoop() {
                         return {};
                     }
                     auto& el = loops_[payload.sender_id & (EVENT_LOOP_THREADS - 1)];
-                    add_peer_if_not_exists(payload.sender_id, payload.fd, el);
+                    add_peer_if_not_exists(payload.sender_id, payload.client_ip_addr, el);
 
                     std::vector<LogEntry> entries;
                     entries.reserve(payload.entries_len);
@@ -678,7 +688,26 @@ inline void Node::MainLoop() {
                     }
                 }
 
-                else if constexpr (std::is_same_v<T, StopNodeMsg>) {
+                else {
+                    static_assert(false, "non-exhaustive visitor");
+                }
+                return {};
+            }, message);
+            #ifdef DEBUG
+            if (err) std::cout << "inbox handler error: " << err.value() << "\n";
+            #else
+            (void)err;
+            #endif
+        });
+
+        client_inbox_->DrainAll([this](ClientMessage&& message) {
+            #ifdef DEBUG
+            std::cout << "draining client inbox...\n";
+            #endif
+            std::optional<std::string> err = std::visit([this, &message](auto&& payload) -> std::optional<std::string> {
+                using T = std::decay_t<decltype(payload)>;
+
+                if constexpr (std::is_same_v<T, StopNodeMsg>) {
                     running_ = false;
                 }
 
@@ -700,17 +729,8 @@ inline void Node::MainLoop() {
                     // TODO: notify client that the state was reconstructed/run a callback
                 }
 
-                else {
-                    static_assert(false, "non-exhaustive visitor");
-                }
                 return {};
-            }, message);
-            #ifdef DEBUG
-            if (err) std::cout << "inbox handler error: " << err.value() << "\n";
-            #else
-            (void)err;
-            #endif
-        });
+        }, message); });
 
         // Periodic flush of log, snapshot, and state machine files
         auto flush_now = std::chrono::steady_clock::now();
@@ -767,4 +787,5 @@ inline void Node::MainLoop() {
         }
         request_votes();
     }
+    return {};
 }
