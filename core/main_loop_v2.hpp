@@ -523,48 +523,6 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 installing_snapshot_.unset(payload.server_id);
             }
 
-            // heartbeats are sent per follower, not all at once.
-            else if constexpr (std::is_same_v<T, HeartbeatTimeout>) {
-                if (state_ != NodeState::Leader) return {}; // in case this node was demoted in the interim
-                #ifdef DEBUG
-                std::cout << "found heartbeat timeout for node " << payload.source_id << "; sending heartbeat...\n";
-                std::cout << "next index = " << next_indexes_[payload.source_id] << "\n";
-                std::cout << "last_applied_idx_ = " << last_applied_idx_ << "\n";
-                std::cout << "base_logical_idx_ = " << base_logical_idx_ << "\n";
-                #endif
-                auto& el = loops_[get_loop_idx(payload.source_id)];
-                const int32_t next_idx = next_indexes_[payload.source_id];
-                if (next_idx == 0) {
-                    return (std::format(
-                        "Failed to process HeartbeatTimeout: next_index 0 for node id {} cannot derive prev_log_idx",
-                        payload.source_id
-                    ));
-                }
-
-                // if last log index >= this follower's nextIndex,
-                // then send AE RPC w/ log entries starting at nextIndex. Otherwise, send term w/ no entries
-
-                if (next_idx < base_logical_idx_) {
-                    installing_snapshot_.set(payload.source_id);
-
-                    std::optional<std::string> send_is_err = send_install_snapshot(el, payload.source_id);
-                    if (send_is_err) {
-                        return (std::format(
-                            "error retrying IS RPC:\n{}\n",
-                            send_is_err.value()
-                        ));
-                    }
-                    return {};
-                }
-                std::optional<std::string> send_ae_err = send_append_entries(next_idx, el, payload.source_id);
-                if (send_ae_err) {
-                    return (std::format(
-                        "error retrying AE RPC:\n{}\n",
-                        send_ae_err.value()
-                    ));
-                }
-            }
-
             else if constexpr (std::is_same_v<T, DropPeerMsg>) {
                 #ifdef DEBUG
                 std::cout << "Received drop peer message - dropping peer " << payload.source_id << "\n";

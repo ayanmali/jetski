@@ -177,11 +177,6 @@ struct InstallSnapshotRespPayload {
     }
 };
 
-// struct ArmTimer { NodeID dest_id; };
-// struct DisarmTimer { NodeID dest_id; };
-
-struct HeartbeatTimeout { NodeID source_id; };
-
 /* For supporting dynamic cluster configurations */
 struct DropPeerMsg { NodeID source_id; };
 struct AddPeerMsg { IPAddr ip_addr; NodeID dest_id; };
@@ -211,6 +206,6 @@ struct AppendClientReq {
 };
 struct ReadStateClientReq { FILE* fp; };
 
-using NodeMessage = std::variant<AppendEntriesReqPayload, RequestVoteReqPayload, InstallSnapshotReqPayload, AppendEntriesRespPayload, RequestVoteRespPayload, InstallSnapshotRespPayload, HeartbeatTimeout, DropPeerMsg, ForwardLeaderMsg, AETimeout, RVTimeout, ISTimeout>;
+using NodeMessage = std::variant<AppendEntriesReqPayload, RequestVoteReqPayload, InstallSnapshotReqPayload, AppendEntriesRespPayload, RequestVoteRespPayload, InstallSnapshotRespPayload, DropPeerMsg, ForwardLeaderMsg, AETimeout, RVTimeout, ISTimeout>;
 using EventLoopMessage = std::variant<AppendEntriesReqPayload, RequestVoteReqPayload, InstallSnapshotReqPayload, AppendEntriesRespPayload, RequestVoteRespPayload, InstallSnapshotRespPayload, AddPeerMsg, ForwardLeaderMsg>;
 using ClientMessage = std::variant<StopNodeMsg, AppendClientReq, ReadStateClientReq>;

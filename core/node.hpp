@@ -314,10 +314,10 @@ inline Node::~Node() {
     if (snapshot_fp_ != nullptr) ::fclose(snapshot_fp_);
     if (snapshot_tmp_fp_ != nullptr) ::fclose(snapshot_tmp_fp_);
 
-    ::close(event_fd_);
-    ::close(election_timeout_fd_);
-    ::close(heartbeat_fd_);
-    ::close(flush_fd_);
+    if (event_fd_ != -1) ::close(event_fd_);
+    if (election_timeout_fd_ != -1) ::close(election_timeout_fd_);
+    if (heartbeat_fd_ != -1) ::close(heartbeat_fd_);
+    if (flush_fd_ != -1) ::close(flush_fd_);
 }
 
 inline void Node::Stop() {
