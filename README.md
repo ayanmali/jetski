@@ -6,7 +6,7 @@ Jetski is an experimental, performance-aware Raft consensus implementation built
 - [Get Started](#get-started)
   - [Prerequisites](#prerequisites)
   - [Configuration](#configuration)
-  - [Code Snippets](#code-snippets)
+  - [Usage](#usage)
 
 # Overview
 This implementation currently supports the following features:
