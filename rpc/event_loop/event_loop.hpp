@@ -29,8 +29,8 @@
 constexpr int MAX_ATTEMPTS = 10;
 
 // for processing incoming requests/replies
-using ELNodeInbox = MPSC<NodeMessage, NODE_INBOX_RING_CAP, EVENT_LOOP_THREADS>;
-using ClientNodeInbox = SPSCQueue<ClientMessage, NODE_INBOX_RING_CAP>;
+using ELNodeInbox = MPSC<NodeMessage, NODE_EVENT_LOOP_INBOX_RING_CAP, EVENT_LOOP_THREADS>;
+using ClientNodeInbox = SPSCQueue<ClientMessage, NODE_CLIENT_INBOX_RING_CAP>;
 
 struct ReplyHandlerVisitor;
 struct RequestHandlerVisitor;
@@ -236,8 +236,6 @@ inline void EventLoop<T>::wake_eventfd_unconditional() {
     #endif
     uint64_t one = 1;
     ssize_t  n   = ::write(event_fd, &one, sizeof(one));
-    (void)n; // EAGAIN is fine; eventfd counter is already > 0 and the loop
-             // will pick up the inbox on its next wake.
 }
 
 template <SocketType T>

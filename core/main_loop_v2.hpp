@@ -40,7 +40,7 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
 
                 #endif
                 IPAddr ip_addr = (payload.client_ip_addr >> 16) & 0xFFFFFFFF;
-                auto& el = loops_[payload.leader_id & (EVENT_LOOP_THREADS - 1)];
+                auto& el = loops_[get_loop_idx(payload.leader_id)];
                 add_peer_if_not_exists(payload.leader_id, ip_addr, el);
 
                 // reply false if:
@@ -217,7 +217,7 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 std::cout << "\n";
                 #endif
                 IPAddr ip_addr = (payload.client_ip_addr >> 16) & 0xFFFFFFFF;
-                auto& el = loops_[payload.candidate_id & (EVENT_LOOP_THREADS - 1)];
+                auto& el = loops_[get_loop_idx(payload.candidate_id)];
                 add_peer_if_not_exists(payload.candidate_id, ip_addr, el);
 
                 if (payload.term > current_term_) {
@@ -290,7 +290,7 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 std::cout << "payload.done = " << static_cast<int>(payload.done) << "\n";
                 #endif
                 IPAddr ip_addr = (payload.client_ip_addr >> 16) & 0xFFFFFFFF;
-                auto& el = loops_[payload.leader_id & (EVENT_LOOP_THREADS - 1)];
+                auto& el = loops_[get_loop_idx(payload.leader_id)];
                 add_peer_if_not_exists(payload.leader_id, ip_addr, el);
 
                 if (payload.term > current_term_) {
@@ -432,7 +432,7 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 }
                 next_indexes_[payload.server_id] = payload.prev_log_idx;
 
-                auto& el = loops_[payload.server_id & (EVENT_LOOP_THREADS - 1)];
+                auto& el = loops_[get_loop_idx(payload.server_id)];
 
                 if (payload.prev_log_idx < base_logical_idx_) {
                     installing_snapshot_.set(payload.server_id);
@@ -511,7 +511,7 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 }
 
                 if (++chunks_sent_[payload.server_id] * SNAPSHOT_CHUNK_SIZE <= snapshot_stat.st_size) {
-                    auto& el = loops_[payload.server_id & (EVENT_LOOP_THREADS - 1)];
+                    auto& el = loops_[get_loop_idx(payload.server_id)];
                     send_install_snapshot(el, payload.server_id);
                     return {};
                 }
@@ -532,7 +532,7 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 std::cout << "last_applied_idx_ = " << last_applied_idx_ << "\n";
                 std::cout << "base_logical_idx_ = " << base_logical_idx_ << "\n";
                 #endif
-                auto& el = loops_[payload.source_id & (EVENT_LOOP_THREADS - 1)];
+                auto& el = loops_[get_loop_idx(payload.source_id)];
                 const int32_t next_idx = next_indexes_[payload.source_id];
                 if (next_idx == 0) {
                     return (std::format(
@@ -600,7 +600,7 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 #endif
 
                 IPAddr ip_addr = (payload.client_ip_addr >> 16) & 0xFFFFFFFF;
-                auto& el = loops_[payload.sender_id & (EVENT_LOOP_THREADS - 1)];
+                auto& el = loops_[get_loop_idx(payload.sender_id)];
                 add_peer_if_not_exists(payload.sender_id, ip_addr, el);
 
                 if (payload.term != current_term_) {
@@ -621,7 +621,7 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
             else if constexpr (std::is_same_v<T, AETimeout>) {
                 // Stale AE retry timer after demotion; only a leader retries AEs.
                 if (state_ != NodeState::Leader || !node_ids_.is_available(payload.source_id)) return {};
-                auto& el = loops_[payload.source_id & (EVENT_LOOP_THREADS - 1)];
+                auto& el = loops_[get_loop_idx(payload.source_id)];
                 const int32_t next_idx = next_indexes_[payload.source_id];
                 if (next_idx == 0) {
                     return (std::format(
@@ -655,7 +655,7 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 // Only a candidate still seeking votes retries; guards
                 // against a stale RV timer firing after winning/demotion.
                 if (state_ != NodeState::Candidate || !node_ids_.is_available(payload.source_id)) return {};
-                auto& el = loops_[payload.source_id & (EVENT_LOOP_THREADS - 1)];
+                auto& el = loops_[get_loop_idx(payload.source_id)];
                 // retry
                 auto p = RequestVoteReqPayload{
                     .dest_id = payload.source_id,
@@ -671,7 +671,7 @@ inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
                 // retry; only a leader (still installing this snapshot) retries
                 if (state_ != NodeState::Leader || !installing_snapshot_.is_set(payload.source_id)) return {};
 
-                auto& el = loops_[payload.source_id & (EVENT_LOOP_THREADS - 1)];
+                auto& el = loops_[get_loop_idx(payload.source_id)];
                 std::optional<std::string> send_is_err = send_install_snapshot(el, payload.source_id);
                 if (send_is_err) {
                     return (std::format(
@@ -798,7 +798,7 @@ inline std::optional<std::string> Node::OnHeartbeat() {
             std::cout << "sending heartbeat to node " << id << "...\n";
             std::cout << "next index = " << next_indexes_[id] << "\n";
             #endif
-            auto& el = loops_[id & (EVENT_LOOP_THREADS - 1)];
+            auto& el = loops_[get_loop_idx(id)];
             const int32_t next_idx = next_indexes_[id];
             if (next_idx == 0) {
                 err = (std::format(

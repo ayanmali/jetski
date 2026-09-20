@@ -335,7 +335,7 @@ inline void Node::request_votes() {
         #ifdef DEBUG
         std::cout << "sending RV to peer " << id << " on event loop " << static_cast<int>(id & (EVENT_LOOP_THREADS - 1)) << "\n";
         #endif
-        auto& el = this->loops_[id & (EVENT_LOOP_THREADS - 1)];
+        auto& el = this->loops_[get_loop_idx(id)];
         el.outbound_inbox.PushOne(
             EventLoopMessage(RequestVoteReqPayload{
                 .dest_id = static_cast<NodeID>(id),
@@ -437,7 +437,7 @@ inline void Node::append_commands_local(std::vector<LogEntry>&& commands) {
 }
 
 inline void Node::forward_request(const std::vector<LogEntry>& commands) {
-    auto& el = loops_[leader_id_ & (EVENT_LOOP_THREADS - 1)];
+    auto& el = loops_[get_loop_idx(leader_id_)];
     size_t sent{0};
     while (sent < commands.size()) {
         size_t num_entries = std::min(commands.size() - sent, MAX_ENTRIES);

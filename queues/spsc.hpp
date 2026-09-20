@@ -17,6 +17,7 @@ Capacity should be a power of 2
 */
 template <typename T, size_t N>
 struct SPSCQueue {
+    static_assert(N > 0, "N must be > 0");
     alignas(CACHE_LINE_SIZE) std::atomic<uint64_t> read_idx{0};   // owned by consumer
     alignas(CACHE_LINE_SIZE) std::atomic<uint64_t> write_idx{0};  // owned by producer
     T buffer[N];
@@ -27,7 +28,12 @@ struct SPSCQueue {
 
         if (write - read >= N) return false;
 
-        buffer[write & (N - 1)] = std::forward<T>(data);
+        if constexpr (N > 0 && (N & (N - 1)) == 0) {
+            buffer[write & (N - 1)] = std::forward<T>(data);
+        }
+        if constexpr (!(N > 0 && (N & (N - 1)) == 0)) {
+            buffer[write % N] = std::forward<T>(data);
+        }
 
         write_idx.fetch_add(1, std::memory_order_release);
         return true;
@@ -40,8 +46,14 @@ struct SPSCQueue {
 
         if (write - read >= N) return false;
 
-        buffer[write & (N - 1)] =
-            T(std::forward<Args>(args)...);
+        if constexpr (N > 0 && (N & (N - 1)) == 0) {
+            buffer[write & (N - 1)] =
+                T(std::forward<Args>(args)...);
+        }
+        if constexpr (!(N > 0 && (N & (N - 1)) == 0)) {
+            buffer[write % N] =
+                T(std::forward<Args>(args)...);
+        }
 
         write_idx.fetch_add(1, std::memory_order_release);
         return true;
@@ -55,8 +67,14 @@ struct SPSCQueue {
 
         if (write - read >= N) return false;
 
-        buffer[write & (N - 1)] =
-            F(std::forward<Args>(args)...);
+        if constexpr (N > 0 && (N & (N - 1)) == 0) {
+            buffer[write & (N - 1)] =
+                F(std::forward<Args>(args)...);
+        }
+        if constexpr (!(N > 0 && (N & (N - 1)) == 0)) {
+            buffer[write % N] =
+                F(std::forward<Args>(args)...);
+        }
 
         write_idx.fetch_add(1, std::memory_order_release);
         return true;
@@ -66,7 +84,13 @@ struct SPSCQueue {
         const size_t read  = read_idx.load(std::memory_order_relaxed);
         const size_t write = write_idx.load(std::memory_order_acquire);
         if (read == write) return false;
-        *out = std::move(buffer[read & (N - 1)]);
+
+        if constexpr (N > 0 && (N & (N - 1)) == 0) {
+            *out = std::move(buffer[read & (N - 1)]);
+        }
+        if constexpr (!(N > 0 && (N & (N - 1)) == 0)) {
+            *out = std::move(buffer[read % N]);
+        }
         // buffer[offset] is now in a valid-but-moved-from state (e.g. null
         // unique_ptr). Next producer overwrites it via move-assign above.
         read_idx.fetch_add(1, std::memory_order_release);
@@ -77,7 +101,13 @@ struct SPSCQueue {
         const size_t read  = read_idx.load(std::memory_order_relaxed);
         const size_t write = write_idx.load(std::memory_order_acquire);
         if (read == write) return false;
-        T out = std::move(buffer[read & (N - 1)]);
+
+        if constexpr (N > 0 && (N & (N - 1)) == 0) {
+            T _ = std::move(buffer[read & (N - 1)]);
+        }
+        if constexpr (!(N > 0 && (N & (N - 1)) == 0)) {
+            T _ = std::move(buffer[read % N]);
+        }
         // buffer[offset] is now in a valid-but-moved-from state (e.g. null
         // unique_ptr). Next producer overwrites it via move-assign above.
         read_idx.fetch_add(1, std::memory_order_release);

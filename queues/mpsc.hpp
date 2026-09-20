@@ -21,8 +21,7 @@ struct MPSC {
     static_assert(std::is_nothrow_move_constructible_v<T> &&
         std::is_nothrow_move_assignable_v<T>,
         "T must be nothrow-movable");
-    static_assert(N > 0 && (N & (N - 1)) == 0, "N must be a power of 2");
-    static_assert(P > 0 && (P & (P - 1)) == 0, "P must be a power of 2");
+    static_assert(P > 0, "P must be > 0");
 
     SPSCQueue<T, N> qs[P];
 
@@ -45,10 +44,20 @@ struct MPSC {
 
     bool Pop(T* out) {
         for (size_t i = 0; i < P; ++i) {
-            const size_t idx = (start_ + i) & (P - 1);
-            if (qs[idx].PopOne(out)) {
-                start_ = (idx + 1) & (P - 1);
-                return true;
+            size_t idx;
+            if constexpr (P > 0 && (P & (P - 1)) == 0) {
+                const size_t idx = (start_ + i) & (P - 1);
+                if (qs[idx].PopOne(out)) {
+                    start_ = (idx + 1) & (P - 1);
+                    return true;
+                }
+            }
+            if constexpr (!(P > 0 && (P & (P - 1)) == 0)) {
+                const size_t idx = (start_ + i) % P;
+                if (qs[idx].PopOne(out)) {
+                    start_ = (idx + 1) % P;
+                    return true;
+                }
             }
         }
         return false;
