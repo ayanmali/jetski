@@ -29,7 +29,7 @@ inline void EventLoop<TCP>::CloseClient(ClientConn<TCP>* c) {
 }
 
 template <>
-inline std::optional<const char*> EventLoop<TCP>::modify_client_interest(ClientConn<TCP>* c, uint32_t events) {
+inline std::optional<const char*> EventLoop<TCP>::modify_client_interest(ClientConn<TCP>* __restrict c, uint32_t events) {
     if (c->epoll_events == events) return {};
     epoll_event ev{};
     ev.events  = events;
@@ -106,7 +106,7 @@ inline std::optional<const char*> EventLoop<TCP>::Accept() {
 }
 
 template <>
-inline std::optional<const char*> EventLoop<TCP>::OnClientWritable(ClientConn<TCP>* c) {
+inline std::optional<const char*> EventLoop<TCP>::OnClientWritable(ClientConn<TCP>* __restrict c) {
     #ifdef DEBUG
     std::cout << "client with ip " << c->client_ip_addr << " writable\n";
     #endif
@@ -138,7 +138,7 @@ inline std::optional<const char*> EventLoop<TCP>::OnClientWritable(ClientConn<TC
 }
 
 template <>
-inline std::optional<const char*> EventLoop<TCP>::OnClientReadable(ClientConn<TCP>* c) {
+inline std::optional<const char*> EventLoop<TCP>::OnClientReadable(ClientConn<TCP>* __restrict c) {
     // TODO: if latency is too high here, replace c.rbuf w a ring buffer, or use readv
     #ifdef DEBUG
     std::cout << "client with ip " << c->client_ip_addr << " readable\n";
@@ -193,7 +193,7 @@ inline std::optional<const char*> EventLoop<TCP>::OnClientReadable(ClientConn<TC
 }
 
 template <SocketType T>
-inline std::optional<std::string> EventLoop<T>::post_reply(AppendEntriesRespPayload& payload) {
+inline std::optional<std::string> EventLoop<T>::post_reply(AppendEntriesRespPayload& __restrict payload) {
     if (!client_data.client_ip_to_conn.contains(payload.client_ip_addr)) {
         return std::format(
             "failed to post AE reply: payload IP + port token {} not found in client connections map",
@@ -238,7 +238,7 @@ inline std::optional<std::string> EventLoop<T>::post_reply(AppendEntriesRespPayl
 }
 
 template <SocketType T>
-inline std::optional<std::string> EventLoop<T>::post_reply(RequestVoteRespPayload& payload) {
+inline std::optional<std::string> EventLoop<T>::post_reply(RequestVoteRespPayload& __restrict payload) {
     if (!client_data.client_ip_to_conn.contains(payload.client_ip_addr)) {
         return std::format(
             "failed to post RV reply: payload IP + port token {} not found in client connections map",
@@ -283,7 +283,7 @@ inline std::optional<std::string> EventLoop<T>::post_reply(RequestVoteRespPayloa
 }
 
 template <SocketType T>
-inline std::optional<std::string> EventLoop<T>::post_reply(InstallSnapshotRespPayload& payload) {
+inline std::optional<std::string> EventLoop<T>::post_reply(InstallSnapshotRespPayload& __restrict payload) {
     if (!client_data.client_ip_to_conn.contains(payload.client_ip_addr)) {
         return std::format(
             "failed to post IS reply: payload IP + port token {} not found in client connections map",

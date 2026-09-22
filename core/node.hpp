@@ -65,14 +65,14 @@ public:
     // TODO: replace AoS EventLoop w/ SoA pattern
     private:
     template <typename T>
-    void send(T&& payload, EventLoop<SOCKET_TYPE>& el) {
+    void send(T&& payload, EventLoop<SOCKET_TYPE>& __restrict el) {
         el.outbound_inbox.PushOne(
             EventLoopMessage(std::forward<T>(payload))
         );
         el.Wake();
     }
-    std::optional<std::string> send_append_entries(int32_t next_idx, EventLoop<SOCKET_TYPE>&, NodeID);
-    std::optional<std::string> send_install_snapshot(EventLoop<SOCKET_TYPE>&, NodeID);
+    std::optional<std::string> send_append_entries(int32_t next_idx, EventLoop<SOCKET_TYPE>& __restrict, NodeID);
+    std::optional<std::string> send_install_snapshot(EventLoop<SOCKET_TYPE>& __restrict, NodeID);
     void request_votes();
 
     void append_commands_local(std::vector<LogEntry>&&);
@@ -88,12 +88,12 @@ public:
     std::optional<const char*> reset_timer(FD fd, uint64_t secs, uint64_t nsecs);
     void randomize_election_timeout();
 
-    std::optional<std::string> OnWake(bool& leader_contact);
+    std::optional<std::string> OnWake(bool& __restrict leader_contact);
     std::optional<std::string> OnElectionTimeout();
     std::optional<std::string> OnHeartbeat();
     std::optional<std::string> OnFlush();
 
-    void add_peer_if_not_exists(NodeID, IPAddr, EventLoop<SOCKET_TYPE>&);
+    void add_peer_if_not_exists(NodeID, IPAddr, EventLoop<SOCKET_TYPE>& __restrict);
     uint32_t compute_new_commit_idx();
     void commit_entries_if_available();
 
@@ -241,19 +241,15 @@ inline std::optional<std::string> Node::CreateNode(Node* n, ELNodeInbox* el_inbo
             }
         }
 
-        const char* init_cluster[BASE_CLUSTER_SIZE];
-        setup_peers(init_cluster);
+        constinit static std::array<IPAddr, BASE_CLUSTER_SIZE> addrs = get_addrs();
 
         for (int i = 0; i < BASE_CLUSTER_SIZE; ++i) {
             n->node_ids_.set_cluster_node(i);
             if (i == MY_ID) continue;
 
-            struct in_addr addr;
-            if (inet_pton(AF_INET, init_cluster[i], &addr) != 1) return "failed to encode IP address into int";
-
             n->loops_[i & (EVENT_LOOP_THREADS - 1)].outbound_inbox.PushOne(
                 EventLoopMessage(
-                    AddPeerMsg{ .ip_addr = addr.s_addr, .dest_id = i }
+                    AddPeerMsg{ .ip_addr = addrs[i], .dest_id = i }
                 )
             );
 
@@ -272,8 +268,7 @@ inline std::optional<std::string> Node::CreateNode(Node* n, ELNodeInbox* el_inbo
             n->loops_[i].Wake();
         }
 
-        const char* mode;
-
+        const char* __restrict mode;
         mode = access(LOG_FILE_PATH, F_OK) == 0
             ? "r+"
             : "w+";
@@ -586,7 +581,7 @@ inline void Node::become_leader() {
     set_timer_periodic(heartbeat_fd_, heartbeat_period_secs_, heartbeat_period_nsecs_);
 }
 
-inline void Node::add_peer_if_not_exists(NodeID node_id, IPAddr ip_addr, EventLoop<SOCKET_TYPE>& el) {
+inline void Node::add_peer_if_not_exists(NodeID node_id, IPAddr ip_addr, EventLoop<SOCKET_TYPE>& __restrict el) {
     if (node_ids_.is_available(node_id)) return;
 
     // The peer is unknown or was dropped earlier. (Re)establish it as a live peer.
@@ -895,7 +890,7 @@ inline void Node::write_voted_for() {
     ::fwrite(&voted_for_, sizeof(voted_for_), 1, log_fp_);
 }
 
-inline std::optional<std::string> Node::send_append_entries(int32_t next_idx, EventLoop<SOCKET_TYPE>& el, NodeID dest_id) {
+inline std::optional<std::string> Node::send_append_entries(int32_t next_idx, EventLoop<SOCKET_TYPE>& __restrict el, NodeID dest_id) {
     #ifdef DEBUG
     std::cout << "checking for entries to send to node " << dest_id << "\n";
     std::cout << "next index = " << next_idx << "\n";
@@ -978,7 +973,7 @@ inline size_t Node::snapshot_config_and_data_offset_bytes() const {
     return sizeof(last_applied_idx_) + sizeof(last_applied_term_);
 }
 
-inline std::optional<std::string> Node::send_install_snapshot(EventLoop<SOCKET_TYPE>& el, NodeID dest_id) {
+inline std::optional<std::string> Node::send_install_snapshot(EventLoop<SOCKET_TYPE>& __restrict el, NodeID dest_id) {
     #ifdef DEBUG
     std::cout << "Sending InstallSnapshot RPC:\n";
     std::cout << "term = " << current_term_ << "\n";

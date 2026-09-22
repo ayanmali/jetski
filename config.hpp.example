@@ -2,23 +2,27 @@
 #include <new>
 #define DEBUG
 
+#include <array>
+#include <string>
+#include <ranges>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <sys/types.h>
 
 static constexpr int BASE_CLUSTER_SIZE = 3;
+
+static constexpr std::string INIT_CLUSTER[BASE_CLUSTER_SIZE] = {
+    "68.183.202.86",
+    "68.183.202.86",
+    "68.183.202.86",
+};
+
 static constexpr size_t MAX_NODES = (BASE_CLUSTER_SIZE * 1.5) + 1; // the maximum number of nodes in the cluster that can be accomodated (used for writing cluster data to snapshot/state files)
 
 static constexpr int MY_ID = 0;
 
 static constexpr int CMD_SIZE = 4; // # of bytes that each command in the log occupies
-
-constexpr void setup_peers(const char** a) {
-    a[0] = "172.26.0.10";
-    a[1] = "172.26.0.11";
-    a[2] = "172.26.0.12";
-}
 
 static constexpr uint16_t SERVER_PORT = 6969;
 
@@ -84,5 +88,47 @@ size_t get_loop_idx(T n) {
         return n & (EVENT_LOOP_THREADS - 1);
     }
     return n % EVENT_LOOP_THREADS;
+}
+
+constexpr int stoi_constexpr(std::string_view sv) {
+    int result = 0;
+    for (char c : sv) {
+        result = result * 10 + (c - '0');
+    }
+    return result;
+}
+
+using IPAddr = uint32_t;
+// must convert to big endian
+constexpr std::array<IPAddr, BASE_CLUSTER_SIZE> get_addrs() {
+    std::array<IPAddr, BASE_CLUSTER_SIZE> addrs{};
+    for (int i = 0; i < BASE_CLUSTER_SIZE; ++i) {
+        auto split_view = INIT_CLUSTER[i] | std::views::split('.');
+        auto it = std::ranges::begin(split_view);
+
+        const std::string octet_str_1((*it).begin(), (*it).end());
+        uint32_t octet = stoi_constexpr(octet_str_1);
+        addrs[i] += octet;
+
+        std::advance(it, 1);
+
+        const std::string octet_str_2((*it).begin(), (*it).end());
+        octet = stoi_constexpr(octet_str_2);
+        addrs[i] += octet * 256;
+
+        std::advance(it, 1);
+
+        const std::string octet_str_3((*it).begin(), (*it).end());
+        octet = stoi_constexpr(octet_str_3);
+        addrs[i] += octet * 65536;
+
+        std::advance(it, 1);
+
+        const std::string octet_str_4((*it).begin(), (*it).end());
+        octet = stoi_constexpr(octet_str_4);
+        addrs[i] += octet * 16777216;
+
+    }
+    return addrs;
 }
 /* ----------------- */

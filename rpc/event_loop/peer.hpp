@@ -12,7 +12,7 @@
 #endif
 
 template <SocketType T>
-inline std::optional<const char*> EventLoop<T>::modify_peer_interest(PeerConn<T>& p, uint32_t events) {
+inline std::optional<const char*> EventLoop<T>::modify_peer_interest(PeerConn<T>& __restrict p, uint32_t events) {
     if (p.epoll_events == events) return {};
     epoll_event ev{};
     ev.events  = events;
@@ -255,7 +255,7 @@ inline std::optional<std::string> EventLoop<UDP>::StartConnect(PeerConn<UDP>& p)
 }
 
 template <>
-inline std::optional<const char*> EventLoop<TCP>::OnPeerReadable(PeerConn<TCP>& p) {
+inline std::optional<const char*> EventLoop<TCP>::OnPeerReadable(PeerConn<TCP>& __restrict p) {
     #ifdef DEBUG
     std::cout << "peer " << p.peer_id << " readable\n";
     #endif
@@ -294,7 +294,7 @@ inline std::optional<const char*> EventLoop<TCP>::OnPeerReadable(PeerConn<TCP>& 
 }
 
 template <>
-inline std::optional<const char*> EventLoop<UDP>::OnPeerReadable(PeerConn<UDP>& p) {
+inline std::optional<const char*> EventLoop<UDP>::OnPeerReadable(PeerConn<UDP>& __restrict p) {
     #ifdef DEBUG
     std::cout << "peer " << p.peer_id << " readable\n";
     #endif
@@ -333,7 +333,7 @@ inline std::optional<const char*> EventLoop<UDP>::OnPeerReadable(PeerConn<UDP>& 
 }
 
 template <>
-inline std::optional<const char*> EventLoop<TCP>::OnPeerWritable(PeerConn<TCP>& p) {
+inline std::optional<const char*> EventLoop<TCP>::OnPeerWritable(PeerConn<TCP>& __restrict p) {
     #ifdef DEBUG
     std::cout << "peer " << p.peer_id << " writable\n";
     #endif
@@ -397,7 +397,7 @@ inline std::optional<const char*> EventLoop<TCP>::OnPeerWritable(PeerConn<TCP>& 
 }
 
 template <>
-inline std::optional<const char*> EventLoop<UDP>::OnPeerWritable(PeerConn<UDP>& p) {
+inline std::optional<const char*> EventLoop<UDP>::OnPeerWritable(PeerConn<UDP>& __restrict p) {
     #ifdef DEBUG
     std::cout << "peer " << p.peer_id << " writable\n";
     #endif
@@ -442,7 +442,7 @@ inline std::optional<const char*> EventLoop<UDP>::OnPeerWritable(PeerConn<UDP>& 
 }
 
 template <SocketType T>
-inline std::optional<const char*> EventLoop<T>::OnPeerAERPCTimeout(PeerConn<T>& p) {
+inline std::optional<const char*> EventLoop<T>::OnPeerAERPCTimeout(PeerConn<T>& __restrict p) {
     #ifdef DEBUG
     std::cout << "AE timeout timer fired for peer " << p.peer_id << "\n";
     #endif
@@ -459,7 +459,7 @@ inline std::optional<const char*> EventLoop<T>::OnPeerAERPCTimeout(PeerConn<T>& 
 }
 
 template <SocketType T>
-inline std::optional<const char*> EventLoop<T>::OnPeerRVRPCTimeout(PeerConn<T>& p) {
+inline std::optional<const char*> EventLoop<T>::OnPeerRVRPCTimeout(PeerConn<T>& __restrict p) {
     #ifdef DEBUG
     std::cout << "RV timeout timer fired for peer " << p.peer_id << "\n";
     #endif
@@ -476,7 +476,7 @@ inline std::optional<const char*> EventLoop<T>::OnPeerRVRPCTimeout(PeerConn<T>& 
 }
 
 template <SocketType T>
-inline std::optional<const char*> EventLoop<T>::OnPeerISRPCTimeout(PeerConn<T>& p) {
+inline std::optional<const char*> EventLoop<T>::OnPeerISRPCTimeout(PeerConn<T>& __restrict p) {
     #ifdef DEBUG
     std::cout << "IS timeout timer fired for peer " << p.peer_id << "\n";
     #endif
@@ -536,7 +536,7 @@ inline void EventLoop<T>::DropPeer(PeerConn<T>& p) {
 
 /* called when draining the messages in the event loop's MPSC inbox. */
 template <SocketType T>
-inline std::optional<std::string> EventLoop<T>::post_inflight(AppendEntriesReqPayload& payload) {
+inline std::optional<std::string> EventLoop<T>::post_inflight(AppendEntriesReqPayload& __restrict payload) {
     if (payload.dest_id < 0 || payload.dest_id >= peer_id_to_conn.size() || !peer_id_to_conn[payload.dest_id]) {
         return {};
     }
@@ -584,7 +584,7 @@ inline std::optional<std::string> EventLoop<T>::post_inflight(AppendEntriesReqPa
 }
 
 template <SocketType T>
-inline std::optional<std::string> EventLoop<T>::post_inflight(RequestVoteReqPayload& payload) {
+inline std::optional<std::string> EventLoop<T>::post_inflight(RequestVoteReqPayload& __restrict payload) {
     if (payload.dest_id < 0 || payload.dest_id >= peer_id_to_conn.size() || !peer_id_to_conn[payload.dest_id]) {
         return {};
     }
@@ -627,7 +627,7 @@ inline std::optional<std::string> EventLoop<T>::post_inflight(RequestVoteReqPayl
 }
 
 template <SocketType T>
-inline std::optional<std::string> EventLoop<T>::post_inflight(InstallSnapshotReqPayload& payload) {
+inline std::optional<std::string> EventLoop<T>::post_inflight(InstallSnapshotReqPayload& __restrict payload) {
     if (payload.dest_id < 0 || payload.dest_id >= peer_id_to_conn.size() || !peer_id_to_conn[payload.dest_id]) {
         return {};
     }
@@ -670,7 +670,7 @@ inline std::optional<std::string> EventLoop<T>::post_inflight(InstallSnapshotReq
 }
 
 template <SocketType T>
-inline std::optional<std::string> EventLoop<T>::post_inflight(ForwardLeaderMsg& payload) {
+inline std::optional<std::string> EventLoop<T>::post_inflight(ForwardLeaderMsg& __restrict payload) {
     if (payload.dest_id < 0 || payload.dest_id >= peer_id_to_conn.size() || !peer_id_to_conn[payload.dest_id]) {
         return {};
     }
@@ -711,65 +711,3 @@ inline std::optional<std::string> EventLoop<T>::post_inflight(ForwardLeaderMsg& 
     }
     return {};
 }
-
-// template <SocketType T>
-// inline std::optional<std::string> EventLoop<T>::arm_heartbeat_timer(NodeID peer_id) {
-//     #ifdef DEBUG
-//     std::cout << "arming heartbeat timer for peer " << peer_id << "\n";
-//     #endif
-
-//     if (peer_id < 0 || peer_id >= peer_id_to_conn.size()) {
-//         return std::format(
-//             "Failed to arm heartbeat timer: peer id {} not found in peer_conns\n",
-//             peer_id);
-//     }
-//     PeerConn<T>& p = peer_id_to_conn[peer_id];
-//     if (!p) {
-//         return std::format(
-//             "Failed to arm heartbeat timer: peer id {} not found in peer_conns\n",
-//             peer_id);
-//     }
-
-//     // Periodic timer: it_value == it_interval == period. The first
-//     // expiration lands `period` from now; subsequent ones fire at the
-//     // same cadence until disarmed.
-//     constexpr long NS_PER_SEC = 1'000'000'000;
-//     itimerspec spec{};
-//     spec.it_value.tv_sec  = heartbeat_period_sec;
-//     spec.it_value.tv_nsec = heartbeat_period_nsec;
-//     spec.it_interval      = spec.it_value;
-//     ::timerfd_settime(p.timer_fds.get_heartbeat(), 0, &spec, nullptr);
-//     return {};
-// }
-
-// template <SocketType T>
-// inline std::optional<std::string> EventLoop<T>::disarm_heartbeat_timer(NodeID peer_id) {
-//     #ifdef DEBUG
-//     std::cout << "disarming heartbeat timer for node " << peer_id << "\n";
-//     #endif
-
-//     if (peer_id < 0 || peer_id >= peer_id_to_conn.size()) {
-//         return std::format(
-//             "Failed to disarm heartbeat timer: peer id {} not found in peer_conns\n",
-//             peer_id);
-//     }
-//     PeerConn<T>& p = peer_id_to_conn[peer_id];
-//     if (!p) {
-//         return std::format(
-//             "Failed to disarm heartbeat timer: peer id {} not found in peer_conns\n",
-//             peer_id);
-//     }
-
-//     // Zero spec disarms
-//     // Drain any already-counted expirations so that
-//     // EPOLLET doesn't deliver a stale read after we return.
-//     if (p.timer_fds.get_heartbeat() == -1) return {};
-
-//     itimerspec zero{};
-//     ::timerfd_settime(p.timer_fds.get_heartbeat(), 0, &zero, nullptr);
-//     uint64_t dummy;
-//     ssize_t n = ::read(p.timer_fds.get_heartbeat(), &dummy, sizeof(dummy));
-//     (void)n;
-
-//     return {};
-// }

@@ -80,7 +80,7 @@ struct SPSCQueue {
         return true;
     }
 
-    bool PopOne(T* out) {
+    bool PopOne(T* __restrict out) {
         const size_t read  = read_idx.load(std::memory_order_relaxed);
         const size_t write = write_idx.load(std::memory_order_acquire);
         if (read == write) return false;

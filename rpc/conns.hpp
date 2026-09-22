@@ -1,21 +1,4 @@
 #pragma once
-/*
-Connection state for inbound (server-side) and outbound (client-side, per-peer)
-connections. Both flavors live in a per-thread EventLoop.
-
-Inbound conns are slab-allocated for O(1) acquire/release and a hard cap on
-concurrent client connections (MAX_SERVER_CONNS). Outbound peer conns are
-held in a small unordered_map keyed by NodeID -- peer count is bounded by
-cluster size, so a slab there would be overkill.
-
-Buffering convention (used by both flavors):
-  - rbuf  : raw bytes pulled from recv(), parsed front-to-back. The parser
-            offset is implicit (bytes are erased from the front when a frame
-            is consumed).
-  - wbuf  : pending bytes to send(). wbuf_offset points at the next byte to
-            send. Once wbuf_offset == wbuf.size(), the buffer is reset and
-            EPOLLOUT is disarmed.
-*/
 #include "../config.hpp"
 #include "./protocol/payloads.hpp"
 #include <cstddef>

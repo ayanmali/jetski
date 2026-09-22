@@ -42,7 +42,7 @@ struct MPSC {
         return qs[producer_id].PushOne(std::forward<T>(data));
     }
 
-    bool Pop(T* out) {
+    bool Pop(T* __restrict out) {
         for (size_t i = 0; i < P; ++i) {
             size_t idx;
             if constexpr (P > 0 && (P & (P - 1)) == 0) {

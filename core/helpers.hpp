@@ -53,7 +53,7 @@ struct NodeBitset {
         cluster(((bits-1) / BITS_PER_UINT64_T) + 1),
         online(((bits-1) / BITS_PER_UINT64_T) + 1) {};
 
-    void reset_cluster(uint64_t* ptr, size_t size) {
+    void reset_cluster(uint64_t* __restrict ptr, size_t size) {
         cluster.resize(((size-1) / sizeof(uint64_t)) + 1);
         online.resize(((size-1) / sizeof(uint64_t)) + 1);
         std::memcpy(cluster.data(), ptr, size);

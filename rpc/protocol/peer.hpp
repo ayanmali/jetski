@@ -69,18 +69,9 @@ inline std::variant<NodeMessage, const char*> parse_is_reply(std::byte* rbuf) {
     return response;
 }
 
-// constexpr std::array<ReplyParserFunc, 3> make_reply_parser_table() {
-//     std::array<ReplyParserFunc, 3> table{};
-//     table[RpcKind::AppendEntries] = parse_ae_reply;
-//     table[RpcKind::RequestVote] = parse_rv_reply;
-//     table[RpcKind::InstallSnapshot] = parse_is_reply;
-
-//     return table;
-// }
-
 // constexpr auto REPLY_PARSER_TABLE = make_reply_parser_table();
 
-inline std::variant<NodeMessage, const char*> parse_rbuf(std::byte* rbuf, uint32_t total_length, TimerFDs& timer_fds) {
+inline std::variant<NodeMessage, const char*> parse_rbuf(std::byte* rbuf, uint32_t total_length, TimerFDs& __restrict timer_fds) {
     uint8_t kind_byte;
     std::memcpy(&kind_byte, rbuf, sizeof(kind_byte));
 
@@ -120,7 +111,7 @@ inline std::variant<NodeMessage, const char*> parse_rbuf(std::byte* rbuf, uint32
 
 /* Outbound */
 
-inline void BufByteWriter::serialize(AppendEntriesReqPayload& payload) {
+inline void BufByteWriter::serialize(AppendEntriesReqPayload& __restrict payload) {
     for (size_t i = 0; i < payload.entries_len; ++i) {
         payload.entries[i].term = htonl(payload.entries[i].term);
     }
@@ -162,7 +153,7 @@ inline void BufByteWriter::serialize(AppendEntriesReqPayload& payload) {
     std::memcpy(buf + ptr, &net_leader_commit, sizeof(net_leader_commit));
 };
 
-inline void BufByteWriter::serialize(const RequestVoteReqPayload& payload) {
+inline void BufByteWriter::serialize(const RequestVoteReqPayload& __restrict payload) {
     auto msg_size          = htonl(payload.size() + sizeof(uint8_t));
     auto net_id            = RpcKind::RequestVote;
     auto net_term          = htonl(payload.term);
@@ -190,7 +181,7 @@ inline void BufByteWriter::serialize(const RequestVoteReqPayload& payload) {
     std::memcpy(buf + ptr, &net_last_log_term, sizeof(net_last_log_term));
 };
 
-inline void BufByteWriter::serialize(InstallSnapshotReqPayload& payload) {
+inline void BufByteWriter::serialize(InstallSnapshotReqPayload& __restrict payload) {
     auto msg_size               = htonl(payload.size() + sizeof(uint8_t));
     auto net_id                 = RpcKind::InstallSnapshot;
     auto net_data_len           = htonll(payload.data_len);
@@ -233,7 +224,7 @@ inline void BufByteWriter::serialize(InstallSnapshotReqPayload& payload) {
     std::memcpy(buf + ptr, &net_done, sizeof(net_done));
 };
 
-inline void BufByteWriter::serialize(const ForwardLeaderMsg& payload) {
+inline void BufByteWriter::serialize(const ForwardLeaderMsg& __restrict payload) {
     auto msg_size           =  htonl(payload.size() + sizeof(uint8_t));
     auto net_id             =  RpcKind::ForwardLeader;
     auto net_entries_len    =  htonll(payload.entries_len);

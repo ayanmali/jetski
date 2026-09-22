@@ -3,7 +3,7 @@
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 
-inline std::optional<std::string> Node::OnWake(bool& leader_contact) {
+inline std::optional<std::string> Node::OnWake(bool& __restrict leader_contact) {
     // drain the inbox, handle messages accordingly
     auto el_handler = [&leader_contact, this](NodeMessage&& message) -> std::optional<std::string> {
         #ifdef DEBUG

@@ -102,33 +102,33 @@ struct EventLoop {
     std::optional<const char*> register_fd(FD fd, uint32_t events, EpollContextKind, TimerKind, uint32_t);
     std::optional<const char*> register_fd(FD fd, uint32_t events, EpollContextKind, uint32_t);
     std::optional<const char*> register_fd(FD fd, uint32_t events, EpollContextKind);
-    std::optional<const char*> modify_client_interest(ClientConn<T>* c, uint32_t events);
-    std::optional<const char*> modify_peer_interest(PeerConn<T>& p, uint32_t events);
+    std::optional<const char*> modify_client_interest(ClientConn<T>* __restrict c, uint32_t events);
+    std::optional<const char*> modify_peer_interest(PeerConn<T>& __restrict p, uint32_t events);
     std::optional<const char*> modify_listener_interest(uint32_t events);
 
-    std::optional<std::string> post_inflight(AppendEntriesReqPayload& payload);
-    std::optional<std::string> post_inflight(RequestVoteReqPayload& payload);
-    std::optional<std::string> post_inflight(InstallSnapshotReqPayload& payload);
-    std::optional<std::string> post_inflight(ForwardLeaderMsg& payload);
+    std::optional<std::string> post_inflight(AppendEntriesReqPayload& __restrict payload);
+    std::optional<std::string> post_inflight(RequestVoteReqPayload& __restrict payload);
+    std::optional<std::string> post_inflight(InstallSnapshotReqPayload& __restrict payload);
+    std::optional<std::string> post_inflight(ForwardLeaderMsg& __restrict payload);
 
-    std::optional<std::string> post_reply(AppendEntriesRespPayload& payload);
-    std::optional<std::string> post_reply(RequestVoteRespPayload& payload);
-    std::optional<std::string> post_reply(InstallSnapshotRespPayload& payload);
+    std::optional<std::string> post_reply(AppendEntriesRespPayload& __restrict payload);
+    std::optional<std::string> post_reply(RequestVoteRespPayload& __restrict payload);
+    std::optional<std::string> post_reply(InstallSnapshotRespPayload& __restrict payload);
 
     // inbound messaging
     std::optional<const char*> setup_listen_socket();
     std::optional<const char*> Accept();
-    std::optional<const char*> OnClientReadable(ClientConn<TCP>* c);
-    std::optional<const char*> OnClientWritable(ClientConn<TCP>* c);
+    std::optional<const char*> OnClientReadable(ClientConn<TCP>* __restrict c);
+    std::optional<const char*> OnClientWritable(ClientConn<TCP>* __restrict c);
     void CloseClient(ClientConn<TCP>* c);
 
     // outbound messaging
-    std::optional<const char*> OnPeerWritable(PeerConn<T>& p);
-    std::optional<const char*> OnPeerReadable(PeerConn<T>& p);
-    std::optional<const char*> OnPeerAERPCTimeout(PeerConn<T>& p);
-    std::optional<const char*> OnPeerRVRPCTimeout(PeerConn<T>& p);
-    std::optional<const char*> OnPeerISRPCTimeout(PeerConn<T>& p);
-    std::optional<std::string> StartConnect(PeerConn<T>& p);
+    std::optional<const char*> OnPeerWritable(PeerConn<T>& __restrict p);
+    std::optional<const char*> OnPeerReadable(PeerConn<T>& __restrict p);
+    std::optional<const char*> OnPeerAERPCTimeout(PeerConn<T>& __restrict p);
+    std::optional<const char*> OnPeerRVRPCTimeout(PeerConn<T>& __restrict p);
+    std::optional<const char*> OnPeerISRPCTimeout(PeerConn<T>& __restrict p);
+    std::optional<std::string> StartConnect(PeerConn<T>& __restrict p);
     void DropPeer(PeerConn<T>& p);
 
     // wake / inbox
@@ -402,6 +402,9 @@ inline std::optional<std::string> EventLoop<T>::DrainInbox() {
                 }
 
             }
+            // else if constexpr (std::is_same_v<U, RemovePeerMsg>) {
+
+            // }
 
             else static_assert(false, "non-exhaustive visitor!");
             return {};

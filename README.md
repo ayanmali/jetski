@@ -55,11 +55,11 @@ cp config.hpp.example config.hpp
 The following parameters must be explicitly configured:
 - `BASE_CLUSTER_SIZE` - the number of nodes in the initial cluster configuration, including the node this is running on. Should be the same across every node's config file. Must be >= 1.
 
-- `MY_ID` - the logical ID of the node this is being ran on. Must be unique across every node, and ideally should be dense (i.e. 0,1,... BASE_CLUSTER_SIZE-1) and not sparse. Must be >= 0.
+- `INIT_CLUSTER` - An array mapping node IDs to their IP addresses. The number of mappings should correspond to `BASE_CLUSTER_SIZE`. Should be consistent across all nodes when starting the cluster for the first time.
+
+- `MY_ID` - the logical ID of the node this is being ran on. Must be unique across every node, and must be dense (i.e. 0,1,... BASE_CLUSTER_SIZE-1) and not sparse. Must be >= 0.
 
 - `CMD_SIZE` - Each log entry contains a term number and a byte-array command of fixed size `CMD_SIZE`. Adjust this based on your application state and the log entries that are used to modify it.
-
-- `setup_peers()` - Initializes the base cluster configuration by mapping node IDs to their IP addresses. The number of mappings should correspond to `BASE_CLUSTER_SIZE`. Should be consistent across all nodes when starting the cluster for the first time.
 
 ### Other Parameters
 The following parameters can optionally be tuned for your system or for potentially better performance:
@@ -75,7 +75,7 @@ The following parameters can optionally be tuned for your system or for potentia
 
 - `SERVER_BACKLOG` - maximum number of incoming connections that can wait on the listening socket's queue before they get dropped. Tune this based on your cluster size and how much it may change during runtime.
 
-- `MAX_SERVER_CONNS` - maximum number of connections to "clients" (nodes on the sending side of an RPC) in the cluster. Tune this based on your cluster size and how much it may change during runtime.
+- `MAX_SERVER_CONNS` - maximum number of connections to "clients" (nodes on the sending side of an RPC) that this node can maintain at once. Tune this based on your cluster size and how much it may change during runtime.
 
 - `LOG_COMPACT_THRESHOLD` - the maximum number of log entries that can be held in memory and stored in the log file before they get compacted. Must be >= 1.
 

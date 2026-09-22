@@ -15,22 +15,18 @@
 # define ntohll(x) (((uint64_t)ntohl((x) & 0xFFFFFFFF) << 32) | ntohl((x) >> 32))
 #endif
 
-static constexpr uint32_t MAX_VECTOR_SIZE_SANITY = 8192;
 struct ByteReader;
 
-using ReqParserFunc = std::variant<NodeMessage, const char*>(*)(ByteReader&, FD);
-using ReplyParserFunc = std::variant<NodeMessage, const char*>(*)(std::byte*);
-
-std::variant<NodeMessage, const char*> parse_rbuf(std::byte* rbuf, uint32_t total_length, TimerFDs& timer_fds);
+std::variant<NodeMessage, const char*> parse_rbuf(std::byte* rbuf, uint32_t total_length, TimerFDs& __restrict timer_fds);
 template <SocketType T>
-std::variant<NodeMessage, const char*> parse_rbuf(ClientConn<T>* c, uint32_t msg_len, size_t parsed);
+std::variant<NodeMessage, const char*> parse_rbuf(ClientConn<T>* __restrict c, uint32_t msg_len, size_t parsed);
 
 struct ByteReader {
     public:
     explicit ByteReader(std::span<const std::byte> bytes)
         : ptr(bytes.data()), end(bytes.data() + bytes.size_bytes()) {};
 
-    bool read(uint8_t& out) {
+    bool read(uint8_t& __restrict out) {
         if (remaining() < sizeof(out)) return false;
 
         std::memcpy(&out, ptr, sizeof(out));
@@ -39,7 +35,7 @@ struct ByteReader {
         return true;
     }
 
-    bool read(uint16_t& out) {
+    bool read(uint16_t& __restrict out) {
         if (remaining() < sizeof(out)) return false;
 
         std::memcpy(&out, ptr, sizeof(out));
@@ -49,7 +45,7 @@ struct ByteReader {
         return true;
     }
 
-    bool read(uint32_t& out) {
+    bool read(uint32_t& __restrict out) {
         if (remaining() < sizeof(out)) return false;
 
         std::memcpy(&out, ptr, sizeof(out));
@@ -59,7 +55,7 @@ struct ByteReader {
         return true;
     }
 
-    bool read(int32_t& out) {
+    bool read(int32_t& __restrict out) {
         if (remaining() < sizeof(out)) return false;
 
         std::memcpy(&out, ptr, sizeof(out));
@@ -69,7 +65,7 @@ struct ByteReader {
         return true;
     }
 
-    bool read(uint64_t& out) {
+    bool read(uint64_t& __restrict out) {
         if (remaining() < sizeof(out)) return false;
 
         std::memcpy(&out, ptr, sizeof(out));
@@ -95,14 +91,14 @@ struct ByteReader {
         return true;
     }
 
-    bool read(uint8_t* out, size_t size) {
+    bool read(uint8_t* __restrict out, size_t size) {
         if (remaining() < size) return false;
         std::memcpy(out, ptr, size);
         ptr += size;
         return true;
     }
 
-    bool read(uint64_t* out, size_t size) { // size of entire array given in bytes
+    bool read(uint64_t* __restrict out, size_t size) { // size of entire array given in bytes
         if (remaining() < size) return false;
         std::memcpy(out, ptr, size);
         for (int i = 0; i < size / sizeof(uint64_t); ++i) {
@@ -112,7 +108,7 @@ struct ByteReader {
         return true;
     }
 
-    bool read (LogEntry* out, size_t n) {
+    bool read (LogEntry* __restrict out, size_t n) {
         if (remaining() < n * sizeof(LogEntry)) return false;
         std::memcpy(out, ptr, n * sizeof(LogEntry));
         ptr += n * sizeof(LogEntry);
@@ -136,13 +132,13 @@ struct ByteReader {
 struct BufByteWriter {
     public:
     BufByteWriter(std::byte* buf_) : buf{buf_} {}
-    void serialize(AppendEntriesReqPayload& payload);
-    void serialize(const RequestVoteReqPayload& payload);
-    void serialize(InstallSnapshotReqPayload& payload);
-    void serialize(const AppendEntriesRespPayload& payload);
-    void serialize(const RequestVoteRespPayload& payload);
-    void serialize(const InstallSnapshotRespPayload& payload);
-    void serialize(const ForwardLeaderMsg& payload);
+    void serialize(AppendEntriesReqPayload& __restrict payload);
+    void serialize(const RequestVoteReqPayload& __restrict payload);
+    void serialize(InstallSnapshotReqPayload& __restrict payload);
+    void serialize(const AppendEntriesRespPayload& __restrict payload);
+    void serialize(const RequestVoteRespPayload& __restrict payload);
+    void serialize(const InstallSnapshotRespPayload& __restrict payload);
+    void serialize(const ForwardLeaderMsg& __restrict payload);
     private:
     std::byte* buf;
 };

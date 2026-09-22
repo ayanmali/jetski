@@ -196,6 +196,7 @@ struct ForwardLeaderMsg {
 };
 
 struct StopNodeMsg {};
+// struct RemovePeerMsg{};
 
 struct AETimeout { NodeID source_id; };
 struct RVTimeout { NodeID source_id; };
@@ -206,6 +207,6 @@ struct AppendClientReq {
 };
 struct ReadStateClientReq { FILE* fp; };
 
-using NodeMessage = std::variant<AppendEntriesReqPayload, RequestVoteReqPayload, InstallSnapshotReqPayload, AppendEntriesRespPayload, RequestVoteRespPayload, InstallSnapshotRespPayload, DropPeerMsg, ForwardLeaderMsg, AETimeout, RVTimeout, ISTimeout>;
+using NodeMessage = std::variant<AppendEntriesReqPayload, RequestVoteReqPayload, InstallSnapshotReqPayload, AppendEntriesRespPayload, RequestVoteRespPayload, InstallSnapshotRespPayload, DropPeerMsg, ForwardLeaderMsg, AETimeout, RVTimeout, ISTimeout /* , RemovePeerMsg */>;
 using EventLoopMessage = std::variant<AppendEntriesReqPayload, RequestVoteReqPayload, InstallSnapshotReqPayload, AppendEntriesRespPayload, RequestVoteRespPayload, InstallSnapshotRespPayload, AddPeerMsg, ForwardLeaderMsg>;
 using ClientMessage = std::variant<StopNodeMsg, AppendClientReq, ReadStateClientReq>;

@@ -5,7 +5,7 @@
 
 /* Inbound */
 
-inline std::variant<NodeMessage, const char*> parse_ae_req(ByteReader& byte_reader, IPAddrPort client_ip_addr) {
+inline std::variant<NodeMessage, const char*> parse_ae_req(ByteReader& __restrict byte_reader, IPAddrPort client_ip_addr) {
     AppendEntriesReqPayload message;
 
     message.client_ip_addr = client_ip_addr;
@@ -22,7 +22,7 @@ inline std::variant<NodeMessage, const char*> parse_ae_req(ByteReader& byte_read
     return message;
 }
 
-inline std::variant<NodeMessage, const char*> parse_rv_req(ByteReader& byte_reader, IPAddrPort client_ip_addr) {
+inline std::variant<NodeMessage, const char*> parse_rv_req(ByteReader& __restrict byte_reader, IPAddrPort client_ip_addr) {
     RequestVoteReqPayload message;
 
     message.client_ip_addr = client_ip_addr;
@@ -35,7 +35,7 @@ inline std::variant<NodeMessage, const char*> parse_rv_req(ByteReader& byte_read
     return message;
 }
 
-inline std::variant<NodeMessage, const char*> parse_is_req(ByteReader& byte_reader, IPAddrPort client_ip_addr) {
+inline std::variant<NodeMessage, const char*> parse_is_req(ByteReader& __restrict byte_reader, IPAddrPort client_ip_addr) {
     InstallSnapshotReqPayload message;
 
     message.client_ip_addr = client_ip_addr;
@@ -53,7 +53,7 @@ inline std::variant<NodeMessage, const char*> parse_is_req(ByteReader& byte_read
     return message;
 }
 
-inline std::variant<NodeMessage, const char*> parse_fl_req(ByteReader& byte_reader, IPAddrPort client_ip_addr) {
+inline std::variant<NodeMessage, const char*> parse_fl_req(ByteReader& __restrict byte_reader, IPAddrPort client_ip_addr) {
     ForwardLeaderMsg message;
 
     message.client_ip_addr = client_ip_addr;
@@ -67,7 +67,7 @@ inline std::variant<NodeMessage, const char*> parse_fl_req(ByteReader& byte_read
     return message;
 }
 
-inline std::variant<NodeMessage, const char*> parse_rbuf(ClientConn<TCP>* c, uint32_t message_size, size_t parsed) {
+inline std::variant<NodeMessage, const char*> parse_rbuf(ClientConn<TCP>* __restrict c, uint32_t message_size, size_t parsed) {
     // if (sizeof(c->rbuf_) < sizeof(uint32_t)) { return ("not enough data to read"); } // need to see message size first
     // ByteReader byte_reader(std::span<std::byte>(c->rbuf_ + sizeof(message_size), c->rbuf_ + sizeof(message_size) + message_size));
     // Restrict reads to this frame's payload so we can't accidentally read into the next frame.
