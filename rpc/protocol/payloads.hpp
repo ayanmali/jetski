@@ -2,13 +2,14 @@
 /*
 RPC request/response payload structs.
 */
-#include "../../config.hpp"
-#include <arpa/inet.h>
+#include "../../queues/spsc.hpp"
+#include "../../queues/mpsc.hpp"
 #include <cstdio>
 #include <cstring>
-#include <netinet/in.h>
 #include <variant>
 #include <vector>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 // static constexpr uint8_t AE_RPC_ID = 0;
 // static constexpr uint8_t RV_RPC_ID = 1;
@@ -22,6 +23,7 @@ using NodeID = int32_t;
 using FD = int;
 using IPAddrPort = uint64_t; // 32 bit IP address left shifted by 16 bits, and 16 bit port number, both in network byte order
 using IPAddr = uint32_t;
+
 inline IPAddrPort encode(IPAddr ip, uint16_t port) {
     return (uint64_t(ip) << 16) | port;
 };
@@ -210,3 +212,7 @@ struct ReadStateClientReq { FILE* fp; };
 using NodeMessage = std::variant<AppendEntriesReqPayload, RequestVoteReqPayload, InstallSnapshotReqPayload, AppendEntriesRespPayload, RequestVoteRespPayload, InstallSnapshotRespPayload, DropPeerMsg, ForwardLeaderMsg, AETimeout, RVTimeout, ISTimeout /* , RemovePeerMsg */>;
 using EventLoopMessage = std::variant<AppendEntriesReqPayload, RequestVoteReqPayload, InstallSnapshotReqPayload, AppendEntriesRespPayload, RequestVoteRespPayload, InstallSnapshotRespPayload, AddPeerMsg, ForwardLeaderMsg>;
 using ClientMessage = std::variant<StopNodeMsg, AppendClientReq, ReadStateClientReq>;
+
+// for processing incoming requests/replies
+using ELNodeInbox = MPSC<NodeMessage, NODE_EVENT_LOOP_INBOX_RING_CAP, EVENT_LOOP_THREADS>;
+using ClientNodeInbox = SPSCQueue<ClientMessage, NODE_CLIENT_INBOX_RING_CAP>;

@@ -687,7 +687,7 @@ inline std::optional<std::string> Node::OnWake(bool& __restrict leader_contact) 
                     #endif
                     return err;
                 }
-                // TODO: notify client that the state was reconstructed/run a callback
+                on_read_state_callback_(payload.fp, commit_index_);
             }
 
             return {};

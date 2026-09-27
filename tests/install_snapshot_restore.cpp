@@ -73,8 +73,8 @@ int main() {
 
     // Seed a stale state machine: only 2 entries applied (8 bytes).
     LogEntry e(1);
-    node.apply_entry(node.sm_fp_, e);
-    node.apply_entry(node.sm_fp_, e);
+    node.apply_entry_(node.sm_fp_, e);
+    node.apply_entry_(node.sm_fp_, e);
     ::fflush(node.sm_fp_);
     node.last_applied_idx_ = 2;
 
