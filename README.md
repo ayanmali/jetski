@@ -57,6 +57,8 @@ The following parameters must be explicitly configured:
 
 - `INIT_CLUSTER` - An array mapping node IDs to their IP addresses. The number of mappings should correspond to `BASE_CLUSTER_SIZE`. Should be consistent across all nodes when starting the cluster for the first time.
 
+- `MAX_NODES` - the maximum number of nodes that the cluster can grow to during runtime. This is used for appropriately sizing certain data structures and for maintaining fixed file offsets for cluster data. This value should be greater than or equal to `BASE_CLUSTER_SIZE`.
+
 - `MY_ID` - the logical ID of the node this is being ran on. Must be unique across every node, and must be dense (i.e. 0,1,... BASE_CLUSTER_SIZE-1) and not sparse. Must be >= 0.
 
 - `CMD_SIZE` - Each log entry contains a term number and a byte-array command of fixed size `CMD_SIZE`. Adjust this based on your application state and the log entries that are used to modify it.
@@ -83,11 +85,11 @@ The following parameters can optionally be tuned for your system or for potentia
 
 - `UDP_RECV_BATCH` - the maximum number of datagrams that can be extracted from the UDP listen-side socket on each `recvmmsg` call. This is unused if TCP is configured as the `SOCKET_TYPE`. Must be >= 1.
 
-- `NODE_EVENT_LOOP_INBOX_RING_CAP` - the byte capacity of the ring buffer used to pass messages from a network thread to the main thread. Can be optimized by setting to a power of 2. Must be >= 1.
+- `NODE_EVENT_LOOP_INBOX_RING_CAP` - the element capacity of the ring buffer used to pass messages from a network thread to the Raft thread. Can be optimized by setting to a power of 2. Must be >= 1.
 
-- `NODE_CLIENT_INBOX_RING_CAP` - the byte capacity of the ring buffer used to pass messages from the client to the main thread. Can be optimized by setting to a power of 2. Must be >= 1.
+- `NODE_CLIENT_INBOX_RING_CAP` - the element capacity of the ring buffer used to pass messages from the client to the Raft thread, and the ring buffer used to pass completion messages from the Raft thread to the client. Can be optimized by setting to a power of 2. Must be >= 1.
 
-- `EVENT_LOOP_INBOX_RING_CAP` - the byte capacity of the ring buffer used to pass messages from the main thread to a network thread. Can be optimized by setting to a power of 2. Must be >= 1.
+- `EVENT_LOOP_INBOX_RING_CAP` - the element capacity of the ring buffer used to pass messages from the Raft thread to a network thread. Can be optimized by setting to a power of 2. Must be >= 1.
 
 - `MIN_ELECTION_TIMEOUT_MS` - the lower bound (in milliseconds) from which to calculate the election timeout, which is re-randomized after each timeout. The default is 150 ms as specified in the Raft paper. Must be >= 1.
 

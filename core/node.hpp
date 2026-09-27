@@ -41,7 +41,7 @@ Persistence:
 
 struct Node {
 public:
-    static std::optional<std::string> CreateNode(Node*, ELNodeInbox*, ClientNodeInbox*, void(*)(FILE*, const LogEntry&));
+    static std::optional<std::string> CreateNode(Node*, ELNodeInbox*, ClientNodeInbox*, void(*)(FILE*, const LogEntry&), void(*)(std::span<LogEntry>), void(*)(FILE*, int));
     ~Node();
     Node()                       = default;
     Node(const Node&)            = delete;
@@ -133,9 +133,9 @@ public:
     FILE*                                                           log_fp_                  = nullptr;
     FILE*                                                           snapshot_fp_             = nullptr;
     FILE*                                                           snapshot_tmp_fp_         = nullptr;
-    void(*apply_entry)(FILE*, const LogEntry&);
-    void(*create_snapshot)(FILE*, FILE*);
-
+    void(*apply_entry_)(FILE*, const LogEntry&);
+    void(*on_commit_callback_)(std::span<LogEntry>);
+    void(*on_read_state_callback_)(FILE* fp, int commit_idx);
     uint64_t                                                        election_timeout_secs_;
     uint64_t                                                        election_timeout_nsecs_;
     uint64_t                                                        heartbeat_period_secs_;
@@ -166,7 +166,7 @@ public:
 // Factory function
 // Node requires stable addresses (i.e. not movable)
 inline std::optional<std::string> Node::CreateNode(Node* n, ELNodeInbox* el_inbox, ClientNodeInbox* client_inbox,
-    void(*apply_entry_to_sm)(FILE*, const LogEntry&)) {
+    void(*apply_entry_to_sm)(FILE*, const LogEntry&), void(*on_commit_callback)(std::span<LogEntry>), void(*on_read_state_callback)(FILE*, int)) {
         static_assert(EVENT_LOOP_THREADS > 0 && (EVENT_LOOP_THREADS & (EVENT_LOOP_THREADS - 1)) == 0,
             "Node: EVENT_LOOP_THREADS must be a power of 2 (MPSC inbox requires it)");
         static_assert(SNAPSHOT_CHUNK_SIZE >= MAX_CLUSTER_HEADER_SIZE,
@@ -174,7 +174,9 @@ inline std::optional<std::string> Node::CreateNode(Node* n, ELNodeInbox* el_inbo
 
         n->el_inbox_ = el_inbox;
         n->client_inbox_ = client_inbox;
-        n->apply_entry = apply_entry_to_sm;
+        n->apply_entry_ = apply_entry_to_sm;
+        n->on_commit_callback_ = on_commit_callback;
+        n->on_read_state_callback_ = on_read_state_callback;
         n->running_ = true;
 
         n->next_indexes_[MY_ID] = -1;
@@ -668,6 +670,10 @@ inline void Node::commit_entries_if_available() {
     }
     #endif
     if (new_commit_idx == commit_index_) return;
+
+    std::span<LogEntry> committed(log_.begin() + commit_index_, log_.begin() + new_commit_idx + 1); // TODO: verify this works
+    on_commit_callback_(committed);
+
     commit_index_ = new_commit_idx;
 
     if (last_applied_idx_ != commit_index_) {
@@ -867,7 +873,7 @@ inline std::optional<std::string> Node::reconstruct_state(FILE* out, uint32_t up
         #ifdef DEBUG
         std::cout << "in state machine: applying entry at logical index " << i << "\n";
         #endif
-        apply_entry(out, log_[i - base_logical_idx_]);
+        apply_entry_(out, log_[i - base_logical_idx_]);
         //::fseek(out, sm_header_bytes(), SEEK_SET);
     }
 

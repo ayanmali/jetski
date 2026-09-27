@@ -1,7 +1,6 @@
 #pragma once
 
 #include "../../config.hpp"
-#include "../../queues/mpsc.hpp"
 #include "../conns.hpp"
 #include "../../errors.hpp"
 #include "../protocol/payloads.hpp"
@@ -27,10 +26,6 @@
 #include <sys/eventfd.h>
 
 constexpr int MAX_ATTEMPTS = 10;
-
-// for processing incoming requests/replies
-using ELNodeInbox = MPSC<NodeMessage, NODE_EVENT_LOOP_INBOX_RING_CAP, EVENT_LOOP_THREADS>;
-using ClientNodeInbox = SPSCQueue<ClientMessage, NODE_CLIENT_INBOX_RING_CAP>;
 
 struct ReplyHandlerVisitor;
 struct RequestHandlerVisitor;
