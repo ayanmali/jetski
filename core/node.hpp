@@ -39,28 +39,32 @@ Persistence:
 #include <sys/types.h>
 #include <unistd.h>
 
+template <typename F>
+concept ApplyFunc = std::invocable<F, FILE*, const LogEntry&> &&
+                    std::same_as<std::invoke_result_t<F, FILE*, const LogEntry&>, void>;
+
+template <typename F>
+concept OnCommitCallback = std::invocable<F, std::span<LogEntry>, int> &&
+                    std::same_as<std::invoke_result_t<F, std::span<LogEntry>, int>, void>;
+
+template <typename F>
+concept OnReadStateCallback = std::invocable<F, FILE*, int> &&
+                    std::same_as<std::invoke_result_t<F, FILE*, int>, void>;
+
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
 struct Node {
 public:
-    static std::optional<std::string> CreateNode(Node*, ELNodeInbox*, ClientNodeInbox*, void(*)(FILE*, const LogEntry&), void(*)(std::span<LogEntry>), void(*)(FILE*, int));
+    static std::optional<std::string> CreateNode(Node<A,C,R>*, ELNodeInbox*, ClientNodeInbox*, A&&, C&&, R&&);
     ~Node();
-    Node()                       = default;
-    Node(const Node&)            = delete;
-    Node& operator=(const Node&) = delete;
-    Node(Node&&)                 = delete;
-    Node& operator=(Node&&)      = delete;
-
-    // Signals every loop to exit, joins all worker threads.
-    void Stop();
+    Node()                              = default;
+    Node(const Node<A,C,R>&)            = delete;
+    Node<A,C,R>& operator=(const Node<A,C,R>&) = delete;
+    Node(Node<A,C,R>&&)                 = delete;
+    Node<A,C,R>& operator=(Node<A,C,R>&&)      = delete;
 
     std::optional<std::string> MainLoop();
 
-    void append_commands(std::vector<std::byte*>&);
-    void append_commands(std::byte (&)[MAX_ENTRIES][CMD_SIZE], size_t num_entries);
-    void append_commands(std::vector<LogEntry>&&);
-
-    void read_state(FILE* out);
-
-    int get_leader();
+    void Wake();
 
     // TODO: replace AoS EventLoop w/ SoA pattern
     private:
@@ -75,8 +79,8 @@ public:
     std::optional<std::string> send_install_snapshot(EventLoop<SOCKET_TYPE>& __restrict, NodeID);
     void request_votes();
 
-    void append_commands_local(std::vector<LogEntry>&&);
-    void forward_request(const std::vector<LogEntry>&);
+    void append_commands_local(const std::byte(* __restrict commands)[CMD_SIZE], size_t num_commands);
+    void forward_request(const std::byte(* __restrict commands)[CMD_SIZE], size_t num_commands);
 
     void advance_to_term(uint32_t);
     std::optional<const char*> demote();
@@ -104,7 +108,7 @@ public:
     std::optional<std::string> reconstruct_state(FILE* out, uint32_t up_to_idx);
 
     /* Helpers */
-    void wake_self();
+    void wake_unconditional();
     size_t snapshot_header_bytes() const;
     size_t sm_header_bytes() const;
     size_t snapshot_config_and_data_offset_bytes() const;
@@ -133,9 +137,9 @@ public:
     FILE*                                                           log_fp_                  = nullptr;
     FILE*                                                           snapshot_fp_             = nullptr;
     FILE*                                                           snapshot_tmp_fp_         = nullptr;
-    void(*apply_entry_)(FILE*, const LogEntry&);
-    void(*on_commit_callback_)(std::span<LogEntry>);
-    void(*on_read_state_callback_)(FILE* fp, int commit_idx);
+    A                                                               apply_entry_;
+    C                                                               on_commit_callback_;
+    R                                                               on_read_state_callback_;
     uint64_t                                                        election_timeout_secs_;
     uint64_t                                                        election_timeout_nsecs_;
     uint64_t                                                        heartbeat_period_secs_;
@@ -160,13 +164,14 @@ public:
     uint32_t                                                        commit_index_            = 0;     // index of highest log entry known to be committed
     enum class                                                      NodeState { Follower, Candidate, Leader };
     NodeState                                                       state_                   = NodeState::Follower;
-    bool                                                            running_                 = false;
+    std::atomic<bool>                                               wake_armed_              = false;
+    public:
+    std::atomic<bool>                                               running_                 = false;
 };
 
-// Factory function
-// Node requires stable addresses (i.e. not movable)
-inline std::optional<std::string> Node::CreateNode(Node* n, ELNodeInbox* el_inbox, ClientNodeInbox* client_inbox,
-    void(*apply_entry_to_sm)(FILE*, const LogEntry&), void(*on_commit_callback)(std::span<LogEntry>), void(*on_read_state_callback)(FILE*, int)) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<std::string> Node<A,C,R>::CreateNode(Node<A,C,R>* n, ELNodeInbox* el_inbox, ClientNodeInbox* client_inbox,
+    A&& apply_entry_to_sm, C&& on_commit_callback, R&& on_read_state_callback) {
         static_assert(EVENT_LOOP_THREADS > 0 && (EVENT_LOOP_THREADS & (EVENT_LOOP_THREADS - 1)) == 0,
             "Node: EVENT_LOOP_THREADS must be a power of 2 (MPSC inbox requires it)");
         static_assert(SNAPSHOT_CHUNK_SIZE >= MAX_CLUSTER_HEADER_SIZE,
@@ -177,7 +182,7 @@ inline std::optional<std::string> Node::CreateNode(Node* n, ELNodeInbox* el_inbo
         n->apply_entry_ = apply_entry_to_sm;
         n->on_commit_callback_ = on_commit_callback;
         n->on_read_state_callback_ = on_read_state_callback;
-        n->running_ = true;
+        n->running_.store(true, std::memory_order_release);
 
         n->next_indexes_[MY_ID] = -1;
         n->match_indexes_[MY_ID] = -1;
@@ -234,7 +239,7 @@ inline std::optional<std::string> Node::CreateNode(Node* n, ELNodeInbox* el_inbo
 
         for (uint i = 0; i < EVENT_LOOP_THREADS; ++i) {
             std::optional<std::string> create_el_err = EventLoop<SOCKET_TYPE>::CreateEventLoop(
-                &n->loops_[i], el_inbox, i, num_peers_init, n->event_fd_
+                &n->loops_[i], el_inbox, i, num_peers_init, &n->wake_armed_, n->event_fd_
             );
             if (create_el_err) {
                 return (
@@ -300,8 +305,9 @@ inline std::optional<std::string> Node::CreateNode(Node* n, ELNodeInbox* el_inbo
         return {};
 }
 
-inline Node::~Node() {
-    running_ = false;
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline Node<A,C,R>::~Node() {
+    running_.store(false, std::memory_order_release);
     for (uint i = 0; i < EVENT_LOOP_THREADS; ++i) {
         if (!loops_[i].stopped.load(std::memory_order_acquire)) loops_[i].Stop();
         if (threads_[i].joinable()) threads_[i].join();
@@ -317,22 +323,24 @@ inline Node::~Node() {
     if (flush_fd_ != -1) ::close(flush_fd_);
 }
 
-inline void Node::Stop() {
-    bool done = false;
-    while (!done) {
-        done = client_inbox_->PushOne(StopNodeMsg{});
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::Wake() {
+    #ifdef DEBUG
+    std::cout << "attempting to wake Node " << MY_ID << "\n";
+    #endif
+    if (!wake_armed_.load(std::memory_order_acquire) && !wake_armed_.exchange(true, std::memory_order_acq_rel)) {
+        wake_unconditional();
     }
-    wake_self();
 }
 
 // ---- outbound --------------------------------------------------------
-
-inline void Node::request_votes() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::request_votes() {
     iterate_node_ids([&](size_t id){
         #ifdef DEBUG
         std::cout << "sending RV to peer " << id << " on event loop " << static_cast<int>(id & (EVENT_LOOP_THREADS - 1)) << "\n";
         #endif
-        auto& el = this->loops_[get_loop_idx(id)];
+        auto& el = loops_[get_loop_idx(id)];
         el.outbound_inbox.PushOne(
             EventLoopMessage(RequestVoteReqPayload{
                 .dest_id = static_cast<NodeID>(id),
@@ -347,44 +355,8 @@ inline void Node::request_votes() {
     for (auto& loop : loops_) { loop.Wake(); }
 }
 
-inline void Node::append_commands(std::vector<std::byte*>& commands) {
-    #ifdef DEBUG
-    std::cout << "client request to append commands\n";
-    #endif
-    std::vector<LogEntry> entries;
-    entries.reserve(commands.size());
-    for (std::byte* command : commands) {
-        entries.emplace_back(command, CMD_SIZE, 0); // term assigned on append
-    }
-    bool done = false;
-    while (!done) {
-        done = client_inbox_->PushOne(AppendClientReq{std::move(entries)});
-    }
-    wake_self();
-}
-
-inline void Node::append_commands(std::byte (&commands)[MAX_ENTRIES][CMD_SIZE], size_t num_entries) {
-    std::vector<LogEntry> entries;
-    entries.reserve(num_entries);
-    for (size_t i = 0; i < num_entries; ++i) {
-        entries.emplace_back(commands[i], CMD_SIZE, 0); // term assigned on append
-    }
-    bool done = false;
-    while (!done) {
-        done = client_inbox_->PushOne(AppendClientReq{std::move(entries)});
-    }
-    wake_self();
-}
-
-inline void Node::append_commands(std::vector<LogEntry>&& commands) {
-    bool done = false;
-    while (!done) {
-        done = client_inbox_->PushOne(AppendClientReq{std::move(commands)});
-    }
-    wake_self();
-}
-
-inline void Node::append_commands_local(std::vector<LogEntry>&& commands) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::append_commands_local(const std::byte(* __restrict commands)[CMD_SIZE], size_t num_entries) {
     #ifdef DEBUG
     std::cout << "Found append request; state = " << static_cast<int>(state_) << "; leader_id = " << leader_id_ << "\n";
     #endif
@@ -393,7 +365,7 @@ inline void Node::append_commands_local(std::vector<LogEntry>&& commands) {
             #ifdef DEBUG
             std::cout << "Not in non-leader state - forwarding...\n";
             #endif
-            forward_request(commands);
+            forward_request(commands, num_entries);
         }
         return; // note: nodes that do not know who the leader is will drop these entries
     }
@@ -410,11 +382,9 @@ inline void Node::append_commands_local(std::vector<LogEntry>&& commands) {
     }
     #endif
 
-    const size_t num_entries = commands.size();
     log_.reserve(log_.size() + num_entries);
-    for (LogEntry& e : commands) {
-        e.term = current_term_;
-        log_.push_back(std::move(e));
+    for (int i = 0; i < num_entries; ++i) {
+        log_.emplace_back(commands[i], CMD_SIZE, current_term_);
     }
     ::fseek(log_fp_, 0, SEEK_END);
     ::fwrite(log_.data() + log_.size() - num_entries, sizeof(LogEntry), num_entries, log_fp_);
@@ -433,43 +403,25 @@ inline void Node::append_commands_local(std::vector<LogEntry>&& commands) {
     #endif
 }
 
-inline void Node::forward_request(const std::vector<LogEntry>& commands) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::forward_request(const std::byte(* __restrict commands)[CMD_SIZE], size_t num_entries) {
     auto& el = loops_[get_loop_idx(leader_id_)];
-    size_t sent{0};
-    while (sent < commands.size()) {
-        size_t num_entries = std::min(commands.size() - sent, MAX_ENTRIES);
-        ForwardLeaderMsg msg{
-            .entries_len = num_entries,
-            .sender_id = MY_ID,
-            .dest_id = static_cast<NodeID>(leader_id_),
-            .term = current_term_
-        };
-        for (size_t i = 0; i < num_entries; ++i) {
-            std::memcpy(msg.entries[i], commands[sent + i].data_, CMD_SIZE);
-        }
-        el.outbound_inbox.PushOne(EventLoopMessage(std::move(msg)));
-        sent += num_entries;
+    ForwardLeaderMsg msg{
+        .entries_len = num_entries,
+        .sender_id = MY_ID,
+        .dest_id = static_cast<NodeID>(leader_id_),
+        .term = current_term_
+    };
+    for (size_t i = 0; i < num_entries; ++i) {
+        std::memcpy(msg.entries[i], commands[i], CMD_SIZE);
     }
+    el.outbound_inbox.PushOne(EventLoopMessage(std::move(msg)));
     el.Wake();
     return;
 }
 
-inline void Node::read_state(FILE* out) {
-    #ifdef DEBUG
-    std::cout << "Found client request to read state\n";
-    #endif
-    bool done = false;
-    while (!done) {
-        done = client_inbox_->PushOne(ReadStateClientReq{out});
-    }
-    wake_self();
-}
-
-inline int Node::get_leader() {
-    return leader_id_;
-}
-
-inline std::optional<const char*> Node::register_fd(FD fd, uint32_t events) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<const char*> Node<A,C,R>::register_fd(FD fd, uint32_t events) {
     epoll_event ev{};
     ev.events  = events;
     ev.data.fd = fd;
@@ -480,7 +432,8 @@ inline std::optional<const char*> Node::register_fd(FD fd, uint32_t events) {
     return {};
 }
 
-inline std::optional<const char*> Node::set_timer_periodic(FD fd, uint64_t secs, uint64_t nsecs) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<const char*> Node<A,C,R>::set_timer_periodic(FD fd, uint64_t secs, uint64_t nsecs) {
     itimerspec spec{};
     spec.it_value.tv_sec  = secs;
     spec.it_value.tv_nsec = nsecs;
@@ -489,7 +442,8 @@ inline std::optional<const char*> Node::set_timer_periodic(FD fd, uint64_t secs,
     return {};
 }
 
-inline std::optional<const char*> Node::set_timer(FD fd, uint64_t secs, uint64_t nsecs) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<const char*> Node<A,C,R>::set_timer(FD fd, uint64_t secs, uint64_t nsecs) {
     itimerspec spec{};
     spec.it_value.tv_sec  = secs;
     spec.it_value.tv_nsec = nsecs;
@@ -498,7 +452,8 @@ inline std::optional<const char*> Node::set_timer(FD fd, uint64_t secs, uint64_t
     return {};
 }
 
-inline std::optional<const char*> Node::reset_timer(FD fd, uint64_t secs, uint64_t nsecs) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<const char*> Node<A,C,R>::reset_timer(FD fd, uint64_t secs, uint64_t nsecs) {
     uint64_t expirations = 0;
     ssize_t n = ::read(fd, &expirations, sizeof(expirations));
     if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
@@ -509,13 +464,15 @@ inline std::optional<const char*> Node::reset_timer(FD fd, uint64_t secs, uint64
     return set_timer(fd, secs, nsecs);
 }
 
-inline void Node::randomize_election_timeout() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::randomize_election_timeout() {
     const uint64_t election_timeout_ns = distrib_(rand_gen_);
     election_timeout_secs_ = election_timeout_ns / NS_PER_SEC;
     election_timeout_nsecs_ = election_timeout_ns % NS_PER_SEC;
 }
 
-inline void Node::advance_to_term(uint32_t term) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::advance_to_term(uint32_t term) {
     #ifdef DEBUG
     std::cout << "this node (id " << MY_ID << ") advanced to term " << term << "\n";
     #endif
@@ -528,7 +485,8 @@ inline void Node::advance_to_term(uint32_t term) {
     demote();
 }
 
-inline std::optional<const char*> Node::demote() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<const char*> Node<A,C,R>::demote() {
     #ifdef DEBUG
     std::cout << "this node (id " << MY_ID << ") was demoted\n";
     #endif
@@ -550,7 +508,8 @@ inline std::optional<const char*> Node::demote() {
     return {};
 }
 
-inline void Node::become_leader() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::become_leader() {
     #ifdef DEBUG
     std::cout << "This node (id = " << MY_ID << ") won the election\n";
 
@@ -583,7 +542,8 @@ inline void Node::become_leader() {
     set_timer_periodic(heartbeat_fd_, heartbeat_period_secs_, heartbeat_period_nsecs_);
 }
 
-inline void Node::add_peer_if_not_exists(NodeID node_id, IPAddr ip_addr, EventLoop<SOCKET_TYPE>& __restrict el) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::add_peer_if_not_exists(NodeID node_id, IPAddr ip_addr, EventLoop<SOCKET_TYPE>& __restrict el) {
     if (node_ids_.is_available(node_id)) return;
 
     // The peer is unknown or was dropped earlier. (Re)establish it as a live peer.
@@ -613,7 +573,8 @@ inline void Node::add_peer_if_not_exists(NodeID node_id, IPAddr ip_addr, EventLo
     #endif
 }
 
-inline uint32_t Node::compute_new_commit_idx() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline uint32_t Node<A,C,R>::compute_new_commit_idx() {
     if (log_.empty()) return commit_index_;
 
     const uint32_t last_log_idx = (log_.size() - 1) + base_logical_idx_;
@@ -650,9 +611,9 @@ inline uint32_t Node::compute_new_commit_idx() {
     return N;
 }
 
-inline void Node::commit_entries_if_available() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::commit_entries_if_available() {
     // commit newly appended entries if possible
-    // TODO: notify client that entries were committed
     uint32_t new_commit_idx = compute_new_commit_idx();
     #ifdef DEBUG
     std::cout << "current commit idx = " << commit_index_ << "\n";
@@ -671,8 +632,8 @@ inline void Node::commit_entries_if_available() {
     #endif
     if (new_commit_idx == commit_index_) return;
 
-    std::span<LogEntry> committed(log_.begin() + commit_index_, log_.begin() + new_commit_idx + 1); // TODO: verify this works
-    on_commit_callback_(committed);
+    std::span<LogEntry> committed(log_.begin() + (commit_index_ - base_logical_idx_ + 1), log_.begin() + (new_commit_idx - base_logical_idx_ + 1) + 1); // TODO: verify this works
+    on_commit_callback_(committed, new_commit_idx);
 
     commit_index_ = new_commit_idx;
 
@@ -686,7 +647,8 @@ inline void Node::commit_entries_if_available() {
     }
 }
 
-inline std::optional<std::string> Node::compact() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<std::string> Node<A,C,R>::compact() {
     #ifdef DEBUG
     std::cout << "log size reached compact threshold; compacting...\n";
     std::cout << "log_.size() = " << log_.size() << "\n";
@@ -769,7 +731,8 @@ inline std::optional<std::string> Node::compact() {
     return {};
 }
 
-inline std::optional<std::string> Node::recover() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<std::string> Node<A,C,R>::recover() {
     // Read existing snapshot if it exists and restore the state machine
     struct stat snapshot_stat;
     bool snapshot_restored = false;
@@ -843,7 +806,8 @@ inline std::optional<std::string> Node::recover() {
     return {};
 }
 
-inline std::optional<std::string> Node::reconstruct_state(FILE* out, uint32_t up_to_idx) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<std::string> Node<A,C,R>::reconstruct_state(FILE* out, uint32_t up_to_idx) {
     assert(snapshot_fp_ != nullptr);
 
     struct stat snapshot_stat;
@@ -880,7 +844,8 @@ inline std::optional<std::string> Node::reconstruct_state(FILE* out, uint32_t up
     return {};
 }
 
-inline void Node::write_current_term() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::write_current_term() {
     #ifdef DEBUG
     std::cout << "writing current term = " << current_term_ << " to log file\n";
     #endif
@@ -888,7 +853,8 @@ inline void Node::write_current_term() {
     ::fwrite(&current_term_, sizeof(current_term_), 1, log_fp_);
 }
 
-inline void Node::write_voted_for() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::write_voted_for() {
     #ifdef DEBUG
     std::cout << "writing voted for id = " << voted_for_ << " to log file\n";
     #endif
@@ -896,7 +862,8 @@ inline void Node::write_voted_for() {
     ::fwrite(&voted_for_, sizeof(voted_for_), 1, log_fp_);
 }
 
-inline std::optional<std::string> Node::send_append_entries(int32_t next_idx, EventLoop<SOCKET_TYPE>& __restrict el, NodeID dest_id) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<std::string> Node<A,C,R>::send_append_entries(int32_t next_idx, EventLoop<SOCKET_TYPE>& __restrict el, NodeID dest_id) {
     #ifdef DEBUG
     std::cout << "checking for entries to send to node " << dest_id << "\n";
     std::cout << "next index = " << next_idx << "\n";
@@ -957,7 +924,8 @@ inline std::optional<std::string> Node::send_append_entries(int32_t next_idx, Ev
     return {};
 }
 
-inline void Node::wake_self() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::wake_unconditional() {
     #ifdef DEBUG
     std::cout << "Main thread - waking node\n";
     #endif
@@ -966,20 +934,24 @@ inline void Node::wake_self() {
     (void)n;
 }
 
-inline size_t Node::snapshot_header_bytes() const {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline size_t Node<A,C,R>::snapshot_header_bytes() const {
     return sizeof(last_applied_idx_) + sizeof(last_applied_term_)
         + sizeof(node_ids_.bytes()) + node_ids_.bytes();
 }
 
-inline size_t Node::sm_header_bytes() const {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline size_t Node<A,C,R>::sm_header_bytes() const {
     return sizeof(node_ids_.bytes()) + node_ids_.bytes();
 }
 
-inline size_t Node::snapshot_config_and_data_offset_bytes() const {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline size_t Node<A,C,R>::snapshot_config_and_data_offset_bytes() const {
     return sizeof(last_applied_idx_) + sizeof(last_applied_term_);
 }
 
-inline std::optional<std::string> Node::send_install_snapshot(EventLoop<SOCKET_TYPE>& __restrict el, NodeID dest_id) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<std::string> Node<A,C,R>::send_install_snapshot(EventLoop<SOCKET_TYPE>& __restrict el, NodeID dest_id) {
     #ifdef DEBUG
     std::cout << "Sending InstallSnapshot RPC:\n";
     std::cout << "term = " << current_term_ << "\n";
@@ -1016,7 +988,8 @@ inline std::optional<std::string> Node::send_install_snapshot(EventLoop<SOCKET_T
     return {};
 }
 
-inline void Node::iterate_node_ids(auto&& callback) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::iterate_node_ids(auto&& callback) {
     uint64_t bitset;
     for (size_t k = 0; k < node_ids_.online.size(); ++k) {
         bitset = node_ids_.online[k];
@@ -1029,7 +1002,8 @@ inline void Node::iterate_node_ids(auto&& callback) {
     }
 }
 
-inline void Node::print_cluster() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline void Node<A,C,R>::print_cluster() {
     std:: cout << "current cluster: " << MY_ID << ", ";
     iterate_node_ids([](size_t id){ // iterates through online (reachable) nodes only
         std::cout << id << ", ";

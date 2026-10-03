@@ -3,7 +3,9 @@
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 
-inline std::optional<std::string> Node::OnWake(bool& __restrict leader_contact) {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_contact) {
+    wake_armed_.store(false, std::memory_order_release);
     // drain the inbox, handle messages accordingly
     auto el_handler = [&leader_contact, this](NodeMessage&& message) -> std::optional<std::string> {
         #ifdef DEBUG
@@ -568,12 +570,7 @@ inline std::optional<std::string> Node::OnWake(bool& __restrict leader_contact) 
                     return {};
                 }
 
-                std::vector<LogEntry> entries;
-                entries.reserve(payload.entries_len);
-                for (size_t i = 0; i < payload.entries_len; ++i) {
-                    entries.emplace_back(payload.entries[i], CMD_SIZE, 0); // term assigned on append
-                }
-                append_commands_local(std::move(entries));
+                append_commands_local(payload.entries, payload.entries_len);
             }
 
             else if constexpr (std::is_same_v<T, AETimeout>) {
@@ -669,14 +666,15 @@ inline std::optional<std::string> Node::OnWake(bool& __restrict leader_contact) 
             using T = std::decay_t<decltype(payload)>;
 
             if constexpr (std::is_same_v<T, StopNodeMsg>) {
-                running_ = false;
+                running_.store(false, std::memory_order_release);
+                wake_unconditional();
             }
 
             else if constexpr (std::is_same_v<T, AppendClientReq>) {
                 #ifdef DEBUG
-                std::cout << "found client append request with " << payload.entries.size() << " commands\n";
+                std::cout << "found client append request with " << payload.num_commands << " commands\n";
                 #endif
-                append_commands_local(std::move(payload.entries));
+                append_commands_local(payload.commands, payload.num_commands);
             }
 
             else if constexpr (std::is_same_v<T, ReadStateClientReq>) {
@@ -704,7 +702,8 @@ inline std::optional<std::string> Node::OnWake(bool& __restrict leader_contact) 
     return {};
 }
 
-inline std::optional<std::string> Node::OnElectionTimeout() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<std::string> Node<A,C,R>::OnElectionTimeout() {
     #ifdef DEBUG
     std::cout << "election timeout; starting election...\n";
     #endif
@@ -744,7 +743,8 @@ inline std::optional<std::string> Node::OnElectionTimeout() {
     return {};
 }
 
-inline std::optional<std::string> Node::OnHeartbeat() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<std::string> Node<A,C,R>::OnHeartbeat() {
     if (node_ids_.num_available != 0) {
         #ifdef DEBUG
         std::cout << "last_applied_idx_ = " << last_applied_idx_ << "\n";
@@ -816,7 +816,8 @@ inline std::optional<std::string> Node::OnHeartbeat() {
     return {};
 }
 
-inline std::optional<std::string> Node::OnFlush() {
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<std::string> Node<A,C,R>::OnFlush() {
     #ifdef DEBUG
     std::cout << "flushing files...\n";
     #endif
@@ -846,11 +847,12 @@ inline std::optional<std::string> Node::OnFlush() {
     return {};
 }
 
-inline std::optional<std::string> Node::MainLoop() {
-    epoll_event evs[EPOLL_BATCH];
+template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
+inline std::optional<std::string> Node<A,C,R>::MainLoop() {
+    epoll_event evs[4]; // one per fd
 
     while (running_) {
-        int n = ::epoll_wait(epoll_fd_, evs, EPOLL_BATCH, -1);
+        int n = ::epoll_wait(epoll_fd_, evs, 4, -1);
 
         if (n < 0) {
             if (errno == EINTR) continue;

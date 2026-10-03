@@ -40,7 +40,7 @@ struct LogEntry {
 
     LogEntry() : data_{} {};
     LogEntry(uint32_t term) : data_{}, term(term) {};
-    LogEntry(std::byte* buf, size_t size, uint32_t term) : term(term) {
+    LogEntry(const std::byte* buf, size_t size, uint32_t term) : term(term) {
         assert(size <= CMD_SIZE);
         std::memcpy(data_, buf, size);
     };
@@ -205,7 +205,8 @@ struct RVTimeout { NodeID source_id; };
 struct ISTimeout { NodeID source_id; };
 
 struct AppendClientReq {
-    std::vector<LogEntry> entries; // terms are assigned by the node thread on append
+    std::byte commands[MAX_ENTRIES][CMD_SIZE];
+    size_t num_commands;
 };
 struct ReadStateClientReq { FILE* fp; };
 
