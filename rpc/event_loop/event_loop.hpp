@@ -52,7 +52,7 @@ One event loop runs on one thread.
 template <SocketType T>
 struct EventLoop {
     public:
-    static std::optional<std::string> CreateEventLoop(EventLoop*, ELNodeInbox*, NodeID this_id, uint num_peers_init, FD node_event_fd);
+    static std::optional<std::string> CreateEventLoop(EventLoop*, ELNodeInbox*, NodeID this_id, uint num_peers_init, std::atomic<bool>* node_wake_armed, FD node_event_fd);
     EventLoop() = default;
     ~EventLoop();
     EventLoop(EventLoop&&) = delete;
@@ -76,13 +76,13 @@ struct EventLoop {
 
     ClientConnSlab<T> client_slab;
 
-    ELNodeInbox* node_inbox = nullptr; // incoming messages; multi-producer (each event loop is a producer)
+    ELNodeInbox* node_inbox{nullptr}; // incoming messages; multi-producer (each event loop is a producer)
 
     uint64_t heartbeat_period_sec;
     uint64_t heartbeat_period_nsec;
     uint64_t rpc_timeout_sec;
     uint64_t rpc_timeout_nsec;
-
+    std::atomic<bool>* node_wake_armed{nullptr};
     std::atomic<bool> wake_armed{false};
 
     FD epoll_fd = -1;
@@ -153,10 +153,11 @@ struct EventLoop {
 #include "./peer.hpp"
 
 template <SocketType T>
-inline std::optional<std::string> EventLoop<T>::CreateEventLoop(EventLoop* loop, ELNodeInbox* node_inbox, NodeID this_id, uint num_peers_init, FD node_event_fd) {
+inline std::optional<std::string> EventLoop<T>::CreateEventLoop(EventLoop* loop, ELNodeInbox* node_inbox, NodeID this_id, uint num_peers_init, std::atomic<bool>* node_wake_armed, FD node_event_fd) {
     loop->node_inbox = node_inbox;
     loop->this_id = this_id;
     loop->peer_id_to_conn.resize(num_peers_init);
+    loop->node_wake_armed = node_wake_armed;
     loop->node_event_fd = node_event_fd;
     loop->heartbeat_period_sec = HEARTBEAT_INTERVAL_NS / NS_PER_SEC;
     loop->heartbeat_period_nsec = HEARTBEAT_INTERVAL_NS % NS_PER_SEC;
@@ -208,9 +209,11 @@ inline void EventLoop<T>::wake_node() {
     #ifdef DEBUG
     std::cout << "waking node\n";
     #endif
-    uint64_t one = 1;
-    ssize_t n = ::write(node_event_fd, &one, sizeof(one));
-    (void)n;
+    if (!node_wake_armed->load(std::memory_order_acquire) && !node_wake_armed->exchange(true, std::memory_order_acq_rel)) {
+        uint64_t one = 1;
+        ssize_t n = ::write(node_event_fd, &one, sizeof(one));
+    }
+
 }
 
 template <SocketType T>
@@ -218,7 +221,7 @@ inline void EventLoop<T>::Wake() {
     #ifdef DEBUG
     std::cout << "waking event loop " << this_id << "\n";
     #endif
-    if (!wake_armed.exchange(true, std::memory_order_acq_rel)) {
+    if (!wake_armed.load(std::memory_order_acquire) && !wake_armed.exchange(true, std::memory_order_acq_rel)) {
         wake_eventfd_unconditional();
     }
 

@@ -1,7 +1,6 @@
 #pragma once
 #include <new>
 #define DEBUG
-
 #include <array>
 #include <string>
 #include <ranges>
@@ -18,7 +17,7 @@ static constexpr std::string INIT_CLUSTER[BASE_CLUSTER_SIZE] = {
     "68.183.202.86",
 };
 
-static constexpr size_t MAX_NODES = (BASE_CLUSTER_SIZE * 1.5) + 1; // the maximum number of nodes in the cluster that can be accomodated (used for writing cluster data to snapshot/state files)
+static constexpr size_t MAX_NODES = 8; // the maximum number of nodes in the cluster that can be accomodated (used for writing cluster data to snapshot/state files)
 
 static constexpr int MY_ID = 0;
 
@@ -45,9 +44,9 @@ static constexpr size_t LOG_COMPACT_THRESHOLD = 4;
 static constexpr int EPOLL_BATCH = 64; // max # of fds processed per loop iteration
 static constexpr int UDP_RECV_BATCH = 32; // Max datagrams drained from the UDP listen socket per recvmmsg() call.
 
-static constexpr size_t NODE_EVENT_LOOP_INBOX_RING_CAP = 512; // network thread -> main thread
-static constexpr size_t NODE_CLIENT_INBOX_RING_CAP = 256; // client -> main thread
-static constexpr size_t EVENT_LOOP_INBOX_RING_CAP = 1024; // main thread -> network thread
+static constexpr size_t NODE_EVENT_LOOP_INBOX_RING_CAP = 512; // network threads -> Raft thread
+static constexpr size_t NODE_CLIENT_INBOX_RING_CAP = 128; // client -> Raft thread
+static constexpr size_t EVENT_LOOP_INBOX_RING_CAP = NODE_EVENT_LOOP_INBOX_RING_CAP / EVENT_LOOP_THREADS; // Raft thread -> each network thread
 
 /* Timers */
 static constexpr int MIN_ELECTION_TIMEOUT_MS = 150;
