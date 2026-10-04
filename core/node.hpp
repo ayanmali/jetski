@@ -75,6 +75,13 @@ public:
         );
         el.Wake();
     }
+
+    template <typename T, typename... Args>
+    void emplace_send(EventLoop<SOCKET_TYPE>& __restrict el, Args&&... args) {
+        el.outbound_inbox.EmplaceOne(T::T, std::forward<Args>(args)...);
+        el.Wake();
+    }
+
     std::optional<std::string> send_append_entries(int32_t next_idx, EventLoop<SOCKET_TYPE>& __restrict, NodeID);
     std::optional<std::string> send_install_snapshot(EventLoop<SOCKET_TYPE>& __restrict, NodeID);
     void request_votes();
@@ -406,21 +413,13 @@ inline void Node<A,C,R>::append_commands_local(const std::byte(* __restrict comm
 template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
 inline void Node<A,C,R>::forward_request(const std::byte(* __restrict commands)[CMD_SIZE], size_t num_entries) {
     auto& el = loops_[get_loop_idx(leader_id_)];
-    // ForwardLeaderMsg msg{
-    //     .entries_len = num_entries,
-    //     .sender_id = MY_ID,
-    //     .dest_id = static_cast<NodeID>(leader_id_),
-    //     .term = current_term_
-    // };
 
-    auto func = [](size_t sz, NodeID x, NodeID y, uint32_t z) -> EventLoopMessage {
-        return ForwardLeaderMsg{};
-    };
-    const auto& msg = (ForwardLeaderMsg&) el.outbound_inbox.EmplaceWithFunc(
-        std::move(func), num_entries, MY_ID, static_cast<NodeID>(leader_id_), current_term_);
-    for (size_t i = 0; i < num_entries; ++i) {
-        std::memcpy(msg.entries[i], commands[i], CMD_SIZE);
-    }
+    el.outbound_inbox.EmplaceOne(
+        [](std::byte(*commands)[CMD_SIZE], size_t num_entries, NodeID sender_id, NodeID dest_id, uint32_t term)
+        {
+            return ForwardLeaderMsg(commands, num_entries, sender_id, dest_id, term);
+        },
+        commands, num_entries, MY_ID, static_cast<NodeID>(leader_id_), current_term_);
 
     el.Wake();
     return;
@@ -916,17 +915,7 @@ inline std::optional<std::string> Node<A,C,R>::send_append_entries(int32_t next_
     std::cout << "sending " << s.size() << " entries\n";
     #endif
 
-    auto p = AppendEntriesReqPayload{
-        s.size(),
-        dest_id,
-        current_term_,
-        MY_ID,
-        prev_log_idx,
-        prev_log_term,
-        commit_index_
-    };
-    std::memcpy(p.entries, s.data(), sizeof(LogEntry) * s.size());
-    send(std::move(p), el);
+    emplace_send<AppendEntriesReqPayload>(el, s.data(), s.size(), dest_id, current_term_, MY_ID, prev_log_idx, prev_log_term, commit_index_);
     return {};
 }
 

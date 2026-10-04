@@ -57,14 +57,16 @@ struct AppendEntriesReqPayload {
     uint32_t prev_log_term;
     uint32_t leader_commit;
 
-    AppendEntriesReqPayload(size_t entries_len, NodeID dest_id, uint32_t term, uint32_t leader_id, uint32_t prev_log_idx, uint32_t prev_log_term, uint32_t leader_commit) :
+    AppendEntriesReqPayload(const LogEntry* logs, size_t entries_len, NodeID dest_id, uint32_t term, uint32_t leader_id, uint32_t prev_log_idx, uint32_t prev_log_term, uint32_t leader_commit) :
         entries_len(entries_len),
         dest_id(dest_id),
         term(term),
         leader_id(leader_id),
         prev_log_idx(prev_log_idx),
         prev_log_term(prev_log_term),
-        leader_commit(leader_commit) {};
+        leader_commit(leader_commit) {
+            std::memcpy(entries, logs, sizeof(LogEntry) * entries_len);
+        };
 
     AppendEntriesReqPayload() {};
 
@@ -192,8 +194,11 @@ struct ForwardLeaderMsg {
     uint32_t term;
 
     ForwardLeaderMsg() = default;
-    ForwardLeaderMsg(size_t sz, NodeID n, NodeID m, uint32_t idk) {
-
+    ForwardLeaderMsg(std::byte(*commands)[CMD_SIZE], size_t entries_len, NodeID sender_id, NodeID dest_id, uint32_t term)
+   : entries_len(entries_len), sender_id(sender_id), dest_id(dest_id), term(term) {
+       for (int i = 0; i < entries_len; ++i) {
+           std::memcpy(entries[i], commands[i], CMD_SIZE);
+       }
     }
 
     static constexpr auto size() {

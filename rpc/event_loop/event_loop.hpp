@@ -132,20 +132,13 @@ struct EventLoop {
     void wake_eventfd_unconditional();
     void wake_node();
 
-    bool post_node_inbox(NodeMessage&& msg) {
+    void post_node_inbox(NodeMessage&& msg) {
         #ifdef DEBUG
         std::cout << "Posting message to node inbox\n";
         #endif
-        bool ok{false};
-        for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
-            if (node_inbox->Push(this_id,
-                NodeMessage(std::forward<NodeMessage>(msg)))) {
-                ok = true;
-                break;
-            }
-        }
+        node_inbox->Push(this_id,
+            NodeMessage(std::forward<NodeMessage>(msg)));
         wake_node();
-        return ok;
     }
 };
 

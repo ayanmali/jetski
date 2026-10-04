@@ -49,15 +49,14 @@ inline void RaftClient<A,C,R>::AppendCommands(const std::vector<const std::byte*
     size_t sent{0};
     while (sent < commands.size()) {
         size_t to_send = std::min(MAX_ENTRIES, commands.size() - sent);
-        AppendClientReq req{.num_commands = to_send};
-        for (int i = 0; i < to_send; ++i) {
-            std::memcpy(req.commands[i], commands[sent + i], CMD_SIZE);
-        }
 
-        bool done = false;
-        while (!done) {
-            done = ci_.PushOne(std::move(req));
-        }
+        ci_.EmplaceOne([&commands, sent](size_t to_send){
+            AppendClientReq r{.num_commands = to_send};
+            for (int i = 0; i < to_send; ++i) {
+                std::memcpy(r.commands[i], commands[sent + i], CMD_SIZE);
+            }
+        }, to_send);
+
         sent += to_send;
     }
     node_.Wake();
@@ -67,14 +66,15 @@ template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
 inline void RaftClient<A,C,R>::AppendCommands(const std::byte (&commands)[MAX_ENTRIES][CMD_SIZE], size_t num_commands) {
     assert(num_commands <= MAX_ENTRIES);
 
-    AppendClientReq req{.num_commands = std::min(MAX_ENTRIES, num_commands)};
-    for (size_t i = 0; i < req.num_commands; ++i) {
-        std::memcpy(req.commands[i], commands[i], CMD_SIZE);
-    }
-    bool done = false;
-    while (!done) {
-        done = ci_.PushOne(std::move(req));
-    }
+    ci_.EmplaceOne([&commands](size_t num_commands) {
+        AppendClientReq r{.num_commands = num_commands};
+        for (size_t i = 0; i < num_commands; ++i) {
+            std::memcpy(r.commands[i], commands[i], CMD_SIZE);
+        }
+        return r;
+    },
+       std::min(MAX_ENTRIES, num_commands)
+    );
     node_.Wake();
 }
 
@@ -83,10 +83,7 @@ inline void RaftClient<A,C,R>::ReadState(FILE* out) {
     #ifdef DEBUG
     std::cout << "Client request to read state\n";
     #endif
-    bool done = false;
-    while (!done) {
-        done = ci_.PushOne(ReadStateClientReq{out});
-    }
+    ci_.EmplaceOne([](FILE* fp){ return ReadStateClientReq{fp}; }, out);
     node_.Wake();
 }
 
@@ -107,10 +104,7 @@ inline std::optional<std::string> RaftClient<A,C,R>::Start() {
 
 template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
 inline void RaftClient<A,C,R>::Stop() {
-    bool done = false;
-    while (!done) {
-        done = ci_.PushOne(StopNodeMsg{});
-    }
+    ci_.EmplaceOne([](){return StopNodeMsg{};});
     node_.Wake();
 }
 

@@ -22,11 +22,11 @@ struct SPSCQueue {
     alignas(CACHE_LINE_SIZE) std::atomic<uint64_t> write_idx{0};  // owned by producer
     T buffer[N];
 
-    bool PushOne(T&& data) {
+    void PushOne(T&& data) {
         const size_t write = write_idx.load(std::memory_order_relaxed);
         const size_t read  = read_idx.load(std::memory_order_acquire);
 
-        if (write - read >= N) return false;
+        // if (write - read >= N) return false;
 
         if constexpr (N > 0 && (N & (N - 1)) == 0) {
             buffer[write & (N - 1)] = std::forward<T>(data);
@@ -36,50 +36,41 @@ struct SPSCQueue {
         }
 
         write_idx.fetch_add(1, std::memory_order_release);
-        return true;
     }
 
     template<typename... Args>
-    const T& EmplaceOne(Args&&... args) {
+    void EmplaceOne(Args&&... args) {
         const size_t write = write_idx.load(std::memory_order_relaxed);
         const size_t read  = read_idx.load(std::memory_order_acquire);
 
-        if (write - read >= N) return false;
+        // if (write - read >= N) return false;
 
         if constexpr (N > 0 && (N & (N - 1)) == 0) {
-            const T& res = buffer[write & (N - 1)];
-            res = T(std::forward<Args>(args)...);
+            buffer[write & (N - 1)] = T(std::forward<Args>(args)...);
             write_idx.fetch_add(1, std::memory_order_release);
-            return res;
         }
         if constexpr (!(N > 0 && (N & (N - 1)) == 0)) {
-            const T& res = buffer[write % N];
-            res = T(std::forward<Args>(args)...);
+            buffer[write % N] = T(std::forward<Args>(args)...);
             write_idx.fetch_add(1, std::memory_order_release);
-            return res;
         }
 
     }
 
     // E.g. can pass `std::make_unique` as the function to create the unique pointer, with `args` as the arguments.
-    template<typename F, typename... Args>
-    const T& EmplaceWithFunc(F&& initializer_func, Args&&... args) {
+    template<typename... Args>
+    void EmplaceOne(auto&& initializer_func, Args&&... args) {
         const size_t write = write_idx.load(std::memory_order_relaxed);
         const size_t read  = read_idx.load(std::memory_order_acquire);
 
-        if (write - read >= N) return false;
+        // if (write - read >= N) return false;
 
         if constexpr (N > 0 && (N & (N - 1)) == 0) {
-            const T& res = buffer[write & (N - 1)];
-            res = F(std::forward<Args>(args)...);
+            buffer[write & (N - 1)] = std::forward<decltype(initializer_func)>(initializer_func)(std::forward<Args>(args)...);
             write_idx.fetch_add(1, std::memory_order_release);
-            return res;
         }
         if constexpr (!(N > 0 && (N & (N - 1)) == 0)) {
-            const T& res = buffer[write % N];
-            res = F(std::forward<Args>(args)...);
+            buffer[write % N] = std::forward<decltype(initializer_func)>(initializer_func)(std::forward<Args>(args)...);
             write_idx.fetch_add(1, std::memory_order_release);
-            return res;
         }
 
     }

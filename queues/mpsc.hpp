@@ -34,12 +34,12 @@ struct MPSC {
     // bool Push(size_t producer_id, size_t payload_size, WriteFn&& write_fn) {
     //     return qs[producer_id].Push(payload_size, std::forward<WriteFn>(write_fn));
     // }
-    bool Push(size_t producer_id, const T& data) {
-        return qs[producer_id].PushOne(data);
+    void Push(size_t producer_id, const T& data) {
+        qs[producer_id].PushOne(data);
     }
 
-    bool Push(size_t producer_id, T&& data) {
-        return qs[producer_id].PushOne(std::forward<T>(data));
+    void Push(size_t producer_id, T&& data) {
+        qs[producer_id].PushOne(std::forward<T>(data));
     }
 
     bool Pop(T* __restrict out) {
@@ -64,13 +64,13 @@ struct MPSC {
     }
 
     template<typename... Args>
-    const T& Emplace(size_t producer_id, Args&&... args) {
-        return qs[producer_id].EmplaceOne(std::forward<Args>(args)...);
+    void Emplace(size_t producer_id, Args&&... args) {
+        qs[producer_id].EmplaceOne(std::forward<Args>(args)...);
     }
 
     template<typename F, typename... Args>
-    const T& Emplace(size_t producer_id, F&& initializer_func, Args&&... args) {
-        return qs[producer_id].EmplaceOne(std::forward<F>(initializer_func), std::forward<Args>(args)...);
+    void Emplace(size_t producer_id, F&& initializer_func, Args&&... args) {
+        qs[producer_id].EmplaceOne(std::forward<F>(initializer_func), std::forward<Args>(args)...);
     }
     // bool Pop(std::vector<std::byte>& payload) {
     //     for (size_t i = 0; i < P; ++i) {
