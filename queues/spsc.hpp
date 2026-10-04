@@ -40,44 +40,48 @@ struct SPSCQueue {
     }
 
     template<typename... Args>
-    bool EmplaceOne(Args&&... args) {
+    const T& EmplaceOne(Args&&... args) {
         const size_t write = write_idx.load(std::memory_order_relaxed);
         const size_t read  = read_idx.load(std::memory_order_acquire);
 
         if (write - read >= N) return false;
 
         if constexpr (N > 0 && (N & (N - 1)) == 0) {
-            buffer[write & (N - 1)] =
-                T(std::forward<Args>(args)...);
+            const T& res = buffer[write & (N - 1)];
+            res = T(std::forward<Args>(args)...);
+            write_idx.fetch_add(1, std::memory_order_release);
+            return res;
         }
         if constexpr (!(N > 0 && (N & (N - 1)) == 0)) {
-            buffer[write % N] =
-                T(std::forward<Args>(args)...);
+            const T& res = buffer[write % N];
+            res = T(std::forward<Args>(args)...);
+            write_idx.fetch_add(1, std::memory_order_release);
+            return res;
         }
 
-        write_idx.fetch_add(1, std::memory_order_release);
-        return true;
     }
 
     // E.g. can pass `std::make_unique` as the function to create the unique pointer, with `args` as the arguments.
     template<typename F, typename... Args>
-    bool EmplaceOne(F&& initializer_func, Args&&... args) {
+    const T& EmplaceWithFunc(F&& initializer_func, Args&&... args) {
         const size_t write = write_idx.load(std::memory_order_relaxed);
         const size_t read  = read_idx.load(std::memory_order_acquire);
 
         if (write - read >= N) return false;
 
         if constexpr (N > 0 && (N & (N - 1)) == 0) {
-            buffer[write & (N - 1)] =
-                F(std::forward<Args>(args)...);
+            const T& res = buffer[write & (N - 1)];
+            res = F(std::forward<Args>(args)...);
+            write_idx.fetch_add(1, std::memory_order_release);
+            return res;
         }
         if constexpr (!(N > 0 && (N & (N - 1)) == 0)) {
-            buffer[write % N] =
-                F(std::forward<Args>(args)...);
+            const T& res = buffer[write % N];
+            res = F(std::forward<Args>(args)...);
+            write_idx.fetch_add(1, std::memory_order_release);
+            return res;
         }
 
-        write_idx.fetch_add(1, std::memory_order_release);
-        return true;
     }
 
     bool PopOne(T* __restrict out) {

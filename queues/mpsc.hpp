@@ -64,12 +64,12 @@ struct MPSC {
     }
 
     template<typename... Args>
-    bool Emplace(size_t producer_id, Args&&... args) {
+    const T& Emplace(size_t producer_id, Args&&... args) {
         return qs[producer_id].EmplaceOne(std::forward<Args>(args)...);
     }
 
     template<typename F, typename... Args>
-    bool Emplace(size_t producer_id, F&& initializer_func, Args&&... args) {
+    const T& Emplace(size_t producer_id, F&& initializer_func, Args&&... args) {
         return qs[producer_id].EmplaceOne(std::forward<F>(initializer_func), std::forward<Args>(args)...);
     }
     // bool Pop(std::vector<std::byte>& payload) {

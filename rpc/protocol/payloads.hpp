@@ -191,6 +191,11 @@ struct ForwardLeaderMsg {
     NodeID dest_id; // for routing purposes only; not serialized across network
     uint32_t term;
 
+    ForwardLeaderMsg() = default;
+    ForwardLeaderMsg(size_t sz, NodeID n, NodeID m, uint32_t idk) {
+
+    }
+
     static constexpr auto size() {
         size_t s = sizeof(entries) + sizeof(entries_len) + sizeof(sender_id) + sizeof(term);
         return s;

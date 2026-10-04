@@ -406,16 +406,22 @@ inline void Node<A,C,R>::append_commands_local(const std::byte(* __restrict comm
 template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
 inline void Node<A,C,R>::forward_request(const std::byte(* __restrict commands)[CMD_SIZE], size_t num_entries) {
     auto& el = loops_[get_loop_idx(leader_id_)];
-    ForwardLeaderMsg msg{
-        .entries_len = num_entries,
-        .sender_id = MY_ID,
-        .dest_id = static_cast<NodeID>(leader_id_),
-        .term = current_term_
+    // ForwardLeaderMsg msg{
+    //     .entries_len = num_entries,
+    //     .sender_id = MY_ID,
+    //     .dest_id = static_cast<NodeID>(leader_id_),
+    //     .term = current_term_
+    // };
+
+    auto func = [](size_t sz, NodeID x, NodeID y, uint32_t z) -> EventLoopMessage {
+        return ForwardLeaderMsg{};
     };
+    const auto& msg = (ForwardLeaderMsg&) el.outbound_inbox.EmplaceWithFunc(
+        std::move(func), num_entries, MY_ID, static_cast<NodeID>(leader_id_), current_term_);
     for (size_t i = 0; i < num_entries; ++i) {
         std::memcpy(msg.entries[i], commands[i], CMD_SIZE);
     }
-    el.outbound_inbox.PushOne(EventLoopMessage(std::move(msg)));
+
     el.Wake();
     return;
 }
