@@ -405,6 +405,7 @@ inline void Node<A,C,R>::append_commands_local(const std::byte(* __restrict comm
 
 template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
 inline void Node<A,C,R>::forward_request(const std::byte(* __restrict commands)[CMD_SIZE], size_t num_entries) {
+    assert(num_entries > 0);
     auto& el = loops_[get_loop_idx(leader_id_)];
     ForwardLeaderMsg msg{
         .entries_len = num_entries,
@@ -412,9 +413,7 @@ inline void Node<A,C,R>::forward_request(const std::byte(* __restrict commands)[
         .dest_id = static_cast<NodeID>(leader_id_),
         .term = current_term_
     };
-    for (size_t i = 0; i < num_entries; ++i) {
-        std::memcpy(msg.entries[i], commands[i], CMD_SIZE);
-    }
+    std::memcpy(msg.entries, commands, num_entries * CMD_SIZE);
     el.outbound_inbox.PushOne(EventLoopMessage(std::move(msg)));
     el.Wake();
     return;
