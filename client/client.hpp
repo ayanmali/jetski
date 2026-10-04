@@ -66,11 +66,11 @@ inline void RaftClient<A,C,R>::AppendCommands(const std::vector<const std::byte*
 template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
 inline void RaftClient<A,C,R>::AppendCommands(const std::byte (&commands)[MAX_ENTRIES][CMD_SIZE], size_t num_commands) {
     assert(num_commands <= MAX_ENTRIES);
+    assert(num_commands > 0);
 
     AppendClientReq req{.num_commands = std::min(MAX_ENTRIES, num_commands)};
-    for (size_t i = 0; i < req.num_commands; ++i) {
-        std::memcpy(req.commands[i], commands[i], CMD_SIZE);
-    }
+    std::memcpy(req.commands, commands, req.num_commands * CMD_SIZE);
+
     bool done = false;
     while (!done) {
         done = ci_.PushOne(std::move(req));
