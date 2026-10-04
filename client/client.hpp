@@ -95,7 +95,7 @@ inline std::optional<std::string> RaftClient<A,C,R>::Start() {
     std::optional<std::string> err;
     node_thread_ = std::jthread([&node_r = node_, &err]() {
         err = node_r.MainLoop();
-        if (err) {
+        if (err) [[unlikely]] {
             #ifdef DEBUG
             std::cout << "Raft node crashed: " << err.value() << "\n";
             #endif

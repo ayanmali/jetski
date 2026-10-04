@@ -216,7 +216,7 @@ inline std::optional<std::string> Node<A,C,R>::CreateNode(Node<A,C,R>* n, ELNode
         res = n->register_fd(n->flush_fd_, EPOLLIN | EPOLLET);
         err |= (bool(res) << ++shift);
 
-        if (err) {
+        if (err) [[unlikely]] {
             return "Failed to create Node - failed to register FDs\n";
         }
 

@@ -407,7 +407,7 @@ inline std::optional<std::string> EventLoop<T>::DrainInbox() {
             else static_assert(false, "non-exhaustive visitor!");
             return {};
         }, out);
-        if (err) return err;
+        if (err) [[unlikely]] return err;
     }
     return {};
 }

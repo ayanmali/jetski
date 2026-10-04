@@ -648,7 +648,7 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
         NodeMessage nmsg;
         while (el_inbox_->qs[i].PopOne(&nmsg)) {
             std::optional<std::string> err = el_handler(std::move(nmsg));
-            if (err) return err;
+            if (err) [[unlikely]] return err;
         }
     }
 
@@ -679,7 +679,7 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
 
             else if constexpr (std::is_same_v<T, ReadStateClientReq>) {
                 std::optional<std::string> err = reconstruct_state(payload.fp, commit_index_);
-                if (err) {
+                if (err) [[unlikely]] {
                     #ifdef DEBUG
                     std::cout << "reconstructed state\n";
                     #endif
@@ -696,7 +696,7 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
     ClientMessage cmsg;
     while (client_inbox_->PopOne(&cmsg)) {
         std::optional<std::string> err = client_handler(std::move(cmsg));
-        if (err) return err;
+        if (err) [[unlikely]] return err;
     }
 
     return {};
@@ -790,7 +790,7 @@ inline std::optional<std::string> Node<A,C,R>::OnHeartbeat() {
             }
         });
 
-        if (err) return err;
+        if (err) [[unlikely]] return err;
     }
 
     for (int i = 0; i < MAX_TIMER_RETRIES; ++i) {
@@ -884,7 +884,7 @@ inline std::optional<std::string> Node<A,C,R>::MainLoop() {
                 #endif
                 auto err = OnWake(leader_contact);
                 #ifdef DEBUG
-                if (err) {
+                if (err) [[unlikely]] {
                     std::cout << "error in OnWake:\n" << err.value() << "\n";
                 }
                 #endif
@@ -902,7 +902,7 @@ inline std::optional<std::string> Node<A,C,R>::MainLoop() {
                 #endif
                 auto err = OnHeartbeat();
                 #ifdef DEBUG
-                if (err) {
+                if (err) [[unlikely]] {
                     std::cout << "error in OnHeartbeat:\n" << err.value() << "\n";
                 }
                 #endif
@@ -915,7 +915,7 @@ inline std::optional<std::string> Node<A,C,R>::MainLoop() {
                 #endif
                 auto err = OnElectionTimeout();
                 #ifdef DEBUG
-                if (err) {
+                if (err) [[unlikely]] {
                     std::cout << "error in OnElectionTimeout:\n" << err.value() << "\n";
                 }
                 #endif
@@ -930,7 +930,7 @@ inline std::optional<std::string> Node<A,C,R>::MainLoop() {
                 #endif
                 auto err = OnFlush();
                 #ifdef DEBUG
-                if (err) {
+                if (err) [[unlikely]] {
                     std::cout << "error in OnFlush:\n" << err.value() << "\n";
                 }
                 #endif
@@ -943,7 +943,7 @@ inline std::optional<std::string> Node<A,C,R>::MainLoop() {
             && last_applied_idx_ >= base_logical_idx_) {
                 auto err = compact();
                 #ifdef DEBUG
-                if (err) {
+                if (err) [[unlikely]] {
                     std::cout << "Error during compaction: " << err.value() << "\n";
                 }
                 #endif
