@@ -205,23 +205,21 @@ inline std::optional<std::string> Node<A,C,R>::CreateNode(Node<A,C,R>* n, ELNode
             return "failed to create Node - failed to create FDs\n";
         }
 
-        uint8_t err{0};
+        uint64_t err{0}; // TODO: what happens if the # of event loops causes the number of errors to exceed 64?
         int shift = -1;
         auto res = n->register_fd(n->event_fd_, EPOLLIN | EPOLLET);
-        err |= bool(res) << ++shift;
+        err |= int(bool(res)) << ++shift;
         res = n->register_fd(n->election_timeout_fd_, EPOLLIN | EPOLLET);
-        err |= (bool(res) << ++shift);
+        err |= int(bool(res)) << ++shift;
         res = n->register_fd(n->heartbeat_fd_, EPOLLIN | EPOLLET);
-        err |= (bool(res) << ++shift);
+        err |= int(bool(res)) << ++shift;
         res = n->register_fd(n->flush_fd_, EPOLLIN | EPOLLET);
-        err |= (bool(res) << ++shift);
+        err |= int(bool(res)) << ++shift;
 
-        if (err) [[unlikely]] {
-            return "Failed to create Node - failed to register FDs\n";
-        }
-
-        n->set_timer(n->election_timeout_fd_, n->election_timeout_secs_, n->election_timeout_nsecs_);
-        n->set_timer_periodic(n->flush_fd_, n->flush_period_secs_, n->flush_period_nsecs_);
+        std::optional<const char*> set_election_timer_err = n->set_timer(n->election_timeout_fd_, n->election_timeout_secs_, n->election_timeout_nsecs_);
+        std::optional<const char*> set_flush_timer_err = n->set_timer_periodic(n->flush_fd_, n->flush_period_secs_, n->flush_period_nsecs_);
+        err |= int(bool(set_election_timer_err)) << ++shift;
+        err |= int(bool(set_flush_timer_err)) << ++shift;
 
         // SIGPIPE would otherwise kill the process if a peer disappears
         // mid-send. send/recv calls also pass MSG_NOSIGNAL belt-and-
@@ -241,11 +239,12 @@ inline std::optional<std::string> Node<A,C,R>::CreateNode(Node<A,C,R>* n, ELNode
             std::optional<std::string> create_el_err = EventLoop<SOCKET_TYPE>::CreateEventLoop(
                 &n->loops_[i], el_inbox, i, num_peers_init, &n->wake_armed_, n->event_fd_
             );
-            if (create_el_err) {
-                return (
-                    std::format("error creating event loop {}:\n{}\n", i, create_el_err.value())
-                );
-            }
+            err |= int(bool(create_el_err)) << ++shift;
+            // if (create_el_err) [[unlikely]] {
+            //     return (
+            //         std::format("error creating event loop {}:\n{}\n", i, create_el_err.value())
+            //     );
+            // }
         }
 
         constinit static std::array<IPAddr, BASE_CLUSTER_SIZE> addrs = get_addrs();
@@ -280,12 +279,13 @@ inline std::optional<std::string> Node<A,C,R>::CreateNode(Node<A,C,R>* n, ELNode
             ? "r+"
             : "w+";
         n->log_fp_ = ::fopen(LOG_FILE_PATH, mode);
-        if (n->log_fp_ == NULL) {
-            return (std::format(
-                "Error opening log file with path {}\n{}\n",
-                LOG_FILE_PATH, errno
-            ));
-        }
+        err |= (n->log_fp_ == NULL) << ++shift;
+        // if (n->log_fp_ == NULL) [[unlikely]] {
+        //     return (std::format(
+        //         "Error opening log file with path {}\n{}\n",
+        //         LOG_FILE_PATH, errno
+        //     ));
+        // }
 
         #ifdef DEBUG
         struct stat st;
@@ -295,19 +295,22 @@ inline std::optional<std::string> Node<A,C,R>::CreateNode(Node<A,C,R>* n, ELNode
         #endif
 
         std::optional<std::string> recover_err = n->recover();
-        if (recover_err) {
-            return (std::format(
-                "Failed to create node: {}\n",
-                recover_err.value()
-            ));
-        }
+        err |= int(bool(recover_err)) << ++shift;
+        // if (recover_err) {
+        //     return (std::format(
+        //         "Failed to create node: {}\n",
+        //         recover_err.value()
+        //     ));
+        // }
 
+        if (err != 0) [[unlikely]] {
+            return "Failed to create Node\n";
+        }
         return {};
 }
 
 template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
 inline Node<A,C,R>::~Node() {
-    running_.store(false, std::memory_order_release);
     for (uint i = 0; i < EVENT_LOOP_THREADS; ++i) {
         if (!loops_[i].stopped.load(std::memory_order_acquire)) loops_[i].Stop();
         if (threads_[i].joinable()) threads_[i].join();
@@ -425,7 +428,7 @@ inline std::optional<const char*> Node<A,C,R>::register_fd(FD fd, uint32_t event
     ev.events  = events;
     ev.data.fd = fd;
 
-    if (::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &ev) < 0) {
+    if (::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &ev) < 0) [[unlikely]] {
         return ("epoll_ctl ADD failed");
     }
     return {};
@@ -455,7 +458,7 @@ template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
 inline std::optional<const char*> Node<A,C,R>::reset_timer(FD fd, uint64_t secs, uint64_t nsecs) {
     uint64_t expirations = 0;
     ssize_t n = ::read(fd, &expirations, sizeof(expirations));
-    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) [[unlikely]] {
         return "error attempting to read fd\n";
     }
     // if (n != sizeof(expirations) || expirations == 0) return {};
@@ -669,7 +672,7 @@ inline std::optional<std::string> Node<A,C,R>::compact() {
     #endif
 
     FILE* sm_tmp_fp = ::fopen(STATE_MACHINE_TMP_FILE_PATH, "w+");
-    if (sm_tmp_fp == nullptr) {
+    if (sm_tmp_fp == nullptr) [[unlikely]] {
         return (std::format(
             "Error opening state machine tmp file with path {}\n",
             STATE_MACHINE_TMP_FILE_PATH
@@ -739,9 +742,9 @@ inline std::optional<std::string> Node<A,C,R>::recover() {
     if (stat(SNAPSHOT_FILE_PATH, &snapshot_stat) == 0
         && snapshot_stat.st_size >= static_cast<off_t>(
             sizeof(size_t)
-            + sizeof(last_applied_idx_) + sizeof(last_applied_term_))) {
+            + sizeof(last_applied_idx_) + sizeof(last_applied_term_))) [[likely]] {
         snapshot_fp_ = ::fopen(SNAPSHOT_FILE_PATH, "r+");
-        if (snapshot_fp_ == nullptr) {
+        if (snapshot_fp_ == nullptr) [[unlikely]] {
             return (std::format(
                 "Error opening snapshot file with path {}\n",
                 SNAPSHOT_FILE_PATH
@@ -773,7 +776,7 @@ inline std::optional<std::string> Node<A,C,R>::recover() {
     struct stat log_stat;
     bool read_log_entries = stat(LOG_FILE_PATH, &log_stat) == 0 && log_stat.st_size != 0;
 
-    if (read_log_entries) {
+    if (read_log_entries) [[likely]] {
         ::fread(&current_term_, sizeof(current_term_), 1, log_fp_);
         ::fread(&voted_for_, sizeof(voted_for_), 1, log_fp_);
 
@@ -787,7 +790,7 @@ inline std::optional<std::string> Node<A,C,R>::recover() {
 
     // Open snapshot file for runtime use
     snapshot_fp_ = ::fopen(SNAPSHOT_FILE_PATH, snapshot_restored ? "r+" : "w+");
-    if (snapshot_fp_ == nullptr) {
+    if (snapshot_fp_ == nullptr) [[unlikely]] {
         return (std::format(
             "Error opening snapshot file with path {}\n",
             SNAPSHOT_FILE_PATH
@@ -869,7 +872,7 @@ inline std::optional<std::string> Node<A,C,R>::send_append_entries(int32_t next_
     std::cout << "base logical idx = " << base_logical_idx_ << "\n";
     std::cout << "log_.size() == " << log_.size() << "\n";
     #endif
-    if (next_idx <= 0) {
+    if (next_idx <= 0) [[unlikely]] {
         return {};
     }
     // Only send entries when the log actually has some at/after
@@ -878,7 +881,7 @@ inline std::optional<std::string> Node<A,C,R>::send_append_entries(int32_t next_
     // A follower whose next_idx is below the compaction boundary is behind
     // the snapshot; prev_log_idx - base_logical_idx_ would underflow, so
     // callers must route such followers through InstallSnapshot instead.
-    if (next_idx < base_logical_idx_) {
+    if (next_idx < base_logical_idx_) [[unlikely]] {
         return std::format(
             "send_append_entries called with next_index {} below snapshot boundary {} for node id {}; InstallSnapshot required",
             next_idx, base_logical_idx_, dest_id
@@ -960,7 +963,7 @@ inline std::optional<std::string> Node<A,C,R>::send_install_snapshot(EventLoop<S
     #endif
 
     struct stat snapshot_stat;
-    if (stat(SNAPSHOT_FILE_PATH, &snapshot_stat) != 0) {
+    if (stat(SNAPSHOT_FILE_PATH, &snapshot_stat) != 0) [[unlikely]] {
         return "Failed to send InstallSnapshot RPC: couldn't get snapshot file size\n";
     }
 

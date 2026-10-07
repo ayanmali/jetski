@@ -122,7 +122,7 @@ RaftClient<A,C,R>::CreateRaftClient(RaftClient<A,C,R>* client, A&& apply_func, C
                                                         std::forward<decltype(on_commit_callback)>(on_commit_callback),
                                                         std::forward<decltype(on_read_state_callback)>(on_read_state_callback));
 
-    if (node_err) {
+    if (node_err) [[unlikely]] {
         return node_err.value();
     }
 

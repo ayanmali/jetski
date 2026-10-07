@@ -35,7 +35,7 @@ inline std::optional<const char*> EventLoop<TCP>::modify_client_interest(ClientC
     ev.events  = events;
     ev.data.u64 = (static_cast<uint64_t>(EpollContextKind::Client) << 56)
                 |  static_cast<uint64_t>(c->fd);
-    if (::epoll_ctl(epoll_fd, EPOLL_CTL_MOD, c->fd, &ev) < 0) {
+    if (::epoll_ctl(epoll_fd, EPOLL_CTL_MOD, c->fd, &ev) < 0) [[unlikely]] {
         CloseClient(c);
         return "Error modifying events for client fd";
     }
@@ -50,7 +50,7 @@ inline std::optional<const char*> EventLoop<UDP>::modify_listener_interest(uint3
     ev.events  = events;
     ev.data.u64 = (static_cast<uint64_t>(EpollContextKind::Listen) << 56)
                 |  static_cast<uint64_t>(listen_fd);
-    if (::epoll_ctl(epoll_fd, EPOLL_CTL_MOD, listen_fd, &ev) < 0) {
+    if (::epoll_ctl(epoll_fd, EPOLL_CTL_MOD, listen_fd, &ev) < 0) [[unlikely]] {
         return "Error modifying events for listen fd";
     }
     listen_epoll_events = events;
@@ -64,7 +64,7 @@ inline std::optional<const char*> EventLoop<TCP>::Accept() {
         socklen_t   plen = sizeof(peer);
         FD fd = ::accept4(listen_fd, reinterpret_cast<sockaddr*>(&peer),
                           &plen, SOCK_NONBLOCK | SOCK_CLOEXEC);
-        if (fd < 0) {
+        if (fd < 0) [[unlikely]] {
             if (errno == EAGAIN || errno == EWOULDBLOCK) return {};
             if (errno == EINTR) continue;
             return {}; // transient errors: drop and try again on next epoll wake
@@ -90,7 +90,7 @@ inline std::optional<const char*> EventLoop<TCP>::Accept() {
         c->epoll_events = EPOLLIN | EPOLLRDHUP | EPOLLET;
 
         std::optional<const char*> client_fd_err = register_fd(fd, c->epoll_events, EpollContextKind::Client);
-        if (client_fd_err) {
+        if (client_fd_err) [[unlikely]] {
             #ifdef DEBUG
             std::cout << "error accepting client connection:\n" << client_fd_err.value() << "\n";
             #endif
@@ -129,7 +129,7 @@ inline std::optional<const char*> EventLoop<TCP>::OnClientWritable(ClientConn<TC
     c->wbuf_offset = 0;
     c->wbuf_size = 0;
     std::optional<const char*> modify_err = modify_client_interest(c, c->epoll_events & ~EPOLLOUT);
-    if (modify_err) {
+    if (modify_err) [[unlikely]] {
         #ifdef DEBUG
         std::cout << modify_err.value() << "\n";
         #endif
@@ -194,7 +194,7 @@ inline std::optional<const char*> EventLoop<TCP>::OnClientReadable(ClientConn<TC
 
 template <SocketType T>
 inline std::optional<std::string> EventLoop<T>::post_reply(AppendEntriesRespPayload& __restrict payload) {
-    if (!client_data.client_ip_to_conn.contains(payload.client_ip_addr)) {
+    if (!client_data.client_ip_to_conn.contains(payload.client_ip_addr)) [[unlikely]] {
         return std::format(
             "failed to post AE reply: payload IP + port token {} not found in client connections map",
             payload.client_ip_addr
@@ -284,7 +284,7 @@ inline std::optional<std::string> EventLoop<T>::post_reply(RequestVoteRespPayloa
 
 template <SocketType T>
 inline std::optional<std::string> EventLoop<T>::post_reply(InstallSnapshotRespPayload& __restrict payload) {
-    if (!client_data.client_ip_to_conn.contains(payload.client_ip_addr)) {
+    if (!client_data.client_ip_to_conn.contains(payload.client_ip_addr)) [[unlikely]] {
         return std::format(
             "failed to post IS reply: payload IP + port token {} not found in client connections map",
             payload.client_ip_addr
@@ -320,7 +320,7 @@ inline std::optional<std::string> EventLoop<T>::post_reply(InstallSnapshotRespPa
     if constexpr (T == UDP) {
         modify_err = modify_listener_interest(listen_epoll_events | EPOLLOUT);
     }
-    if (modify_err) {
+    if (modify_err) [[unlikely]] {
         return modify_err.value();
     }
     Wake();

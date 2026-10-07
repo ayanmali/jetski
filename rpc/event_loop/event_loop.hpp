@@ -139,7 +139,7 @@ struct EventLoop {
         bool ok{false};
         for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
             if (node_inbox->Push(this_id,
-                NodeMessage(std::forward<NodeMessage>(msg)))) {
+                NodeMessage(std::forward<NodeMessage>(msg)))) [[likely]] {
                 ok = true;
                 break;
             }
@@ -164,26 +164,36 @@ inline std::optional<std::string> EventLoop<T>::CreateEventLoop(EventLoop* loop,
     loop->rpc_timeout_sec = RPC_TIMEOUT_NS / NS_PER_SEC;
     loop->rpc_timeout_nsec = RPC_TIMEOUT_NS % NS_PER_SEC;
 
+    uint8_t errs{0};
+    uint8_t count{0};
     // Epoll fd
     loop->epoll_fd = ::epoll_create1(EPOLL_CLOEXEC);
-    if (loop->epoll_fd < 0) return ("epoll_create1 failed");
+    errs |= (loop->epoll_fd < 0) << count++;
+    // if (loop->epoll_fd < 0) [[unlikely]] return ("epoll_create1 failed");
 
     // Listening socket
     std::optional<const char*> listen_err = loop->setup_listen_socket();
-    if (listen_err) return ("listen socket could not be set up");
+    errs |= int(bool(listen_err)) << count++;
+    // if (listen_err) return ("listen socket could not be set up");
     std::optional<const char*> register_err = loop->register_fd(loop->listen_fd, EPOLLIN | EPOLLET, EpollContextKind::Listen);
-    if (register_err) return (
-        std::format("error initializing event loop; listen fd registration failed:\n{}\n", register_err.value())
-    );
+    // if (register_err) return (
+    //     std::format("error initializing event loop; listen fd registration failed:\n{}\n", register_err.value())
+    // );
+    errs |= int(bool(register_err)) << count++;
     loop->listen_epoll_events = EPOLLIN | EPOLLET;
 
     // Cross-thread event fd
     loop->event_fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    if (loop->event_fd < 0) return ("eventfd failed");
+    errs |= (loop->event_fd < 0) << count++;
+    // if (loop->event_fd < 0) return ("eventfd failed");
     register_err = loop->register_fd(loop->event_fd, EPOLLIN | EPOLLET, EpollContextKind::Wake);
-    if (register_err) return (
-        std::format("error initializing event loop; event fd registration failed:\n{}\n", register_err.value())
-    );
+    errs |= int(bool(register_err)) << count++;
+    // if (register_err) return (
+    //     std::format("error initializing event loop; event fd registration failed:\n{}\n", register_err.value())
+    // );
+    if (errs != 0) [[unlikely]] {
+        return "error initializing fds\n";
+    }
 
     return {};
 }
@@ -244,7 +254,7 @@ inline std::optional<const char*> EventLoop<T>::register_fd(FD fd, uint32_t even
         | (static_cast<uint64_t>(subtype) << 48)
         | idx;
 
-    if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) {
+    if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) [[unlikely]] {
         return ("epoll_ctl ADD failed");
     }
     return {};
@@ -258,7 +268,7 @@ inline std::optional<const char*> EventLoop<T>::register_fd(FD fd, uint32_t even
     ev.data.u64 |= (static_cast<uint64_t>(kind) << 56)
         | idx;
 
-    if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) {
+    if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) [[unlikely]] {
         return ("epoll_ctl ADD failed");
     }
     return {};
@@ -272,7 +282,7 @@ inline std::optional<const char*> EventLoop<T>::register_fd(FD fd, uint32_t even
     ev.data.u64 |= (static_cast<uint64_t>(kind) << 56)
         | fd;
 
-    if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) {
+    if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) [[unlikely]] {
         return ("epoll_ctl ADD failed");
     }
     return {};
@@ -290,11 +300,14 @@ inline std::optional<const char*> EventLoop<T>::setup_listen_socket() {
     }
     hints.ai_flags    = AI_PASSIVE;
 
+    uint8_t errs{0};
+    uint8_t count{0};
     addrinfo* res = nullptr;
     std::string port_str = std::to_string(SERVER_PORT);
-    if (::getaddrinfo(nullptr, port_str.c_str(), &hints, &res) != 0 || res == nullptr) {
-        return ("getaddrinfo failed");
-    }
+    errs |= (::getaddrinfo(nullptr, port_str.c_str(), &hints, &res) != 0 || res == nullptr) << count++;
+    // if (::getaddrinfo(nullptr, port_str.c_str(), &hints, &res) != 0 || res == nullptr) {
+    //     return ("getaddrinfo failed");
+    // }
 
     if constexpr (T == TCP) {
         listen_fd = ::socket(res->ai_family, res->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, res->ai_protocol);
@@ -302,7 +315,8 @@ inline std::optional<const char*> EventLoop<T>::setup_listen_socket() {
     if constexpr (T == UDP) {
         listen_fd = ::socket(res->ai_family, res->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, res->ai_protocol);
     }
-    if (listen_fd < 0) return ("socket failed");
+    errs |= (listen_fd < 0) << count++;
+    // if (listen_fd < 0) [[unlikely]] return ("socket failed");
 
     int yes = 1;
     // SO_REUSEPORT allows for kernel load balancing of incoming requests
@@ -324,8 +338,13 @@ inline std::optional<const char*> EventLoop<T>::setup_listen_socket() {
         if (::bind(listen_fd, p->ai_addr, p->ai_addrlen) == 0) break;
     }
 
-    if (!p) { ::close(listen_fd); return ("bind failed"); }
+    errs |= (!p) << count++;
+    // if (!p) { ::close(listen_fd); return ("bind failed"); }
 
+    if (errs != 0) [[unlikely]] {
+        if (listen_fd > 0) ::close(listen_fd);
+        return "failed to initialize + bind + listen listener socket fd\n";
+    }
     ::freeaddrinfo(res);
 
     if constexpr (SOCKET_TYPE == TCP) {
@@ -363,7 +382,7 @@ inline std::optional<std::string> EventLoop<T>::DrainInbox() {
                 std::cout << "found request in event loop outbound inbox\n";
                 #endif
                 std::optional<std::string> post_err = post_inflight(payload);
-                if (post_err) {
+                if (post_err) [[unlikely]] {
                     return (std::format(
                         "Error while draining event loop inbox - failed to post RPC to inflight queue for peer {}:\n{}",
                         payload.dest_id, post_err.value()
@@ -378,7 +397,7 @@ inline std::optional<std::string> EventLoop<T>::DrainInbox() {
                 std::cout << "found reply in event loop outbound inbox\n";
                 #endif
                 std::optional<std::string> post_err = post_reply(payload);
-                if (post_err) {
+                if (post_err) [[unlikely]] {
                     return (std::format(
                         "Error while draining event loop inbox - failed to post reply to inflight queue for peer {}:\n{}",
                         payload.server_id, post_err.value()
@@ -392,7 +411,7 @@ inline std::optional<std::string> EventLoop<T>::DrainInbox() {
                 #endif
 
                 std::optional<std::string> add_peer_err = AddPeer(payload.dest_id, payload.ip_addr);
-                if (add_peer_err) {
+                if (add_peer_err) [[unlikely]] {
                     return (std::format(
                         "Failed to add peer - AddPeer failed for ip address + port {}\n{}\n",
                         payload.ip_addr, add_peer_err.value()
@@ -425,7 +444,7 @@ inline std::optional<std::string> EventLoop<T>::OnEventFd() {
         break;
     }
     std::optional<std::string> drain_err = DrainInbox();
-    if (drain_err) {
+    if (drain_err) [[unlikely]] {
         return (std::format(
             "Error while draining inbox:\n{}\n",
             drain_err.value()

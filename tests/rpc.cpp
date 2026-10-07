@@ -1,4 +1,3 @@
-#include "../rpc/event_loop/event_loop.hpp"
 #include "../client/client.hpp"
 #include <thread>
 

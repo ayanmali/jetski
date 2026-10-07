@@ -13,7 +13,7 @@ inline std::optional<std::string> EventLoop<T>::Run() {
         #endif
         int n = ::epoll_wait(epoll_fd, evs, EPOLL_BATCH, -1);
 
-        if (n < 0) {
+        if (n < 0) [[unlikely]] {
             if (errno == EINTR) continue;
             return ("epoll_wait failed");
         }
@@ -39,7 +39,7 @@ inline std::optional<std::string> EventLoop<T>::Run() {
                         std::cout << "accepting new client connection\n";
                         #endif
                         std::optional<const char*> accept_err = Accept();
-                        if (accept_err) {
+                        if (accept_err) [[unlikely]] {
                             return std::format(
                                 "failed to accept new client connection; skipping:\n{}\n",
                                 accept_err.value());
@@ -151,7 +151,7 @@ inline std::optional<std::string> EventLoop<T>::Run() {
                                 // post_reply re-arm generates a fresh edge
                                 std::optional<const char*> modify_err =
                                     modify_listener_interest(listen_epoll_events & ~EPOLLOUT);
-                                if (modify_err) {
+                                if (modify_err) [[unlikely]] {
                                     #ifdef DEBUG
                                     std::cout << modify_err.value() << "\n";
                                     #endif
@@ -167,7 +167,7 @@ inline std::optional<std::string> EventLoop<T>::Run() {
                     std::cout << "event fd awakened\n";
                     #endif
                     std::optional<std::string> on_event_fd_err = OnEventFd();
-                    if (on_event_fd_err) {
+                    if (on_event_fd_err) [[unlikely]] {
                         return (std::format(
                             "Failed to process new event:\n{}\n",
                             on_event_fd_err.value()
@@ -178,7 +178,7 @@ inline std::optional<std::string> EventLoop<T>::Run() {
 
                 case EpollContextKind::Peer: {
                     PeerConn<T>& p = peer_id_to_conn[ctx & 0xFFFFFFFF];
-                    if (e & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+                    if (e & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) [[unlikely]] {
                         #ifdef DEBUG
                         std::cout << "event loop received epoll error ";
                         if (e & EPOLLERR) {
@@ -200,7 +200,7 @@ inline std::optional<std::string> EventLoop<T>::Run() {
                         std::cout << "obtained reply from peer " << p.peer_id << "\n";
                         #endif
                         std::optional<const char*> readable_err = OnPeerReadable(p);
-                        if (readable_err) {
+                        if (readable_err) [[unlikely]] {
                             #ifdef DEBUG
                             std::cout << "failed to read incoming peer reply:\n" << readable_err.value() << "\n";
                             #endif
@@ -212,7 +212,7 @@ inline std::optional<std::string> EventLoop<T>::Run() {
                         std::cout << "ready to send RPC to peer " << p.peer_id << "\n";
                         #endif
                         std::optional<const char*> writable_err = OnPeerWritable(p);
-                        if (writable_err) {
+                        if (writable_err) [[unlikely]] {
                             #ifdef DEBUG
                             std::cout << "failed to write RPC to peer socket:\n" << writable_err.value() << "\n";
                             #endif
@@ -228,7 +228,7 @@ inline std::optional<std::string> EventLoop<T>::Run() {
                         if (!client_data.client_fd_to_ip.contains(client_fd)) break;
                         if (!client_data.client_ip_to_conn.contains(client_data.client_fd_to_ip[client_fd])) break;
                         ClientConn<TCP>* c = client_data.client_ip_to_conn[client_data.client_fd_to_ip[client_fd]];
-                        if (e & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+                        if (e & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) [[unlikely]] {
                             #ifdef DEBUG
                             std::cout << "epoll error found for client " << c->client_ip_addr << ":";
                             if (e & EPOLLERR) {
@@ -249,7 +249,7 @@ inline std::optional<std::string> EventLoop<T>::Run() {
                             std::cout << "new client message from client with ip " << c->client_ip_addr << "\n";
                             #endif
                             std::optional<const char*> readable_err = OnClientReadable(c);
-                            if (readable_err) {
+                            if (readable_err) [[unlikely]] {
                                 #ifdef DEBUG
                                 std::cout << "failed to read incoming client message from client with ip " << c->client_ip_addr << ":\n" << readable_err.value() << "\n";
                                 #endif
@@ -261,7 +261,7 @@ inline std::optional<std::string> EventLoop<T>::Run() {
                             std::cout << "ready to send reply to client with ip " << c->client_ip_addr << "\n";
                             #endif
                             std::optional<const char*> writable_err = OnClientWritable(c);
-                            if (writable_err) {
+                            if (writable_err) [[unlikely]] {
                                 #ifdef DEBUG
                                 std::cout << "failed to write to client socket:\n" << writable_err.value() << "\n";
                                 #endif
@@ -287,7 +287,7 @@ inline std::optional<std::string> EventLoop<T>::Run() {
                             case TimerKind::RV: timer_err = OnPeerRVRPCTimeout(p);     break;
                             case TimerKind::IS: timer_err = OnPeerISRPCTimeout(p);     break;
                         }
-                        if (timer_err) {
+                        if (timer_err) [[unlikely]] {
                             #ifdef DEBUG
                             std::cout << "failed to handle " << kind_name[static_cast<uint8_t>(subtype)]
                                       << " timer for peer " << p.peer_id << ":\n" << timer_err.value() << "\n";

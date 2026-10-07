@@ -27,7 +27,7 @@ struct ByteReader {
         : ptr(bytes.data()), end(bytes.data() + bytes.size_bytes()) {};
 
     bool read(uint8_t& __restrict out) {
-        if (remaining() < sizeof(out)) return false;
+        if (remaining() < sizeof(out)) [[unlikely]] return false;
 
         std::memcpy(&out, ptr, sizeof(out));
         ptr += sizeof(out);
@@ -36,7 +36,7 @@ struct ByteReader {
     }
 
     bool read(uint16_t& __restrict out) {
-        if (remaining() < sizeof(out)) return false;
+        if (remaining() < sizeof(out)) [[unlikely]] return false;
 
         std::memcpy(&out, ptr, sizeof(out));
         out = ntohs(out);
@@ -46,7 +46,7 @@ struct ByteReader {
     }
 
     bool read(uint32_t& __restrict out) {
-        if (remaining() < sizeof(out)) return false;
+        if (remaining() < sizeof(out)) [[unlikely]] return false;
 
         std::memcpy(&out, ptr, sizeof(out));
         out = ntohl(out);
@@ -56,7 +56,7 @@ struct ByteReader {
     }
 
     bool read(int32_t& __restrict out) {
-        if (remaining() < sizeof(out)) return false;
+        if (remaining() < sizeof(out)) [[unlikely]] return false;
 
         std::memcpy(&out, ptr, sizeof(out));
         out = ntohl(out);
@@ -66,7 +66,7 @@ struct ByteReader {
     }
 
     bool read(uint64_t& __restrict out) {
-        if (remaining() < sizeof(out)) return false;
+        if (remaining() < sizeof(out)) [[unlikely]] return false;
 
         std::memcpy(&out, ptr, sizeof(out));
         out = ntohll(out);
@@ -76,7 +76,7 @@ struct ByteReader {
     }
 
     bool read(std::byte* out, size_t size) {
-        if (remaining() < size) return false;
+        if (remaining() < size) [[unlikely]] return false;
         std::memcpy(out, ptr, size);
         ptr += size;
         return true;
@@ -85,21 +85,21 @@ struct ByteReader {
 
     template <size_t COL_SIZE, size_t ROW_SIZE>
     bool read(std::byte (&out)[COL_SIZE][ROW_SIZE], size_t num_rows) {
-        if (remaining() < num_rows * ROW_SIZE) return false;
+        if (remaining() < num_rows * ROW_SIZE) [[unlikely]] return false;
         std::memcpy(&out, ptr, num_rows * ROW_SIZE);
         ptr += num_rows * ROW_SIZE;
         return true;
     }
 
     bool read(uint8_t* __restrict out, size_t size) {
-        if (remaining() < size) return false;
+        if (remaining() < size) [[unlikely]] return false;
         std::memcpy(out, ptr, size);
         ptr += size;
         return true;
     }
 
     bool read(uint64_t* __restrict out, size_t size) { // size of entire array given in bytes
-        if (remaining() < size) return false;
+        if (remaining() < size) [[unlikely]] return false;
         std::memcpy(out, ptr, size);
         for (int i = 0; i < size / sizeof(uint64_t); ++i) {
             out[i] = ntohll(out[i]);
@@ -109,7 +109,7 @@ struct ByteReader {
     }
 
     bool read (LogEntry* __restrict out, size_t n) {
-        if (remaining() < n * sizeof(LogEntry)) return false;
+        if (remaining() < n * sizeof(LogEntry)) [[unlikely]]  return false;
         std::memcpy(out, ptr, n * sizeof(LogEntry));
         ptr += n * sizeof(LogEntry);
 

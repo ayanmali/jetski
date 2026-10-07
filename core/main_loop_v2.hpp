@@ -398,11 +398,11 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                 std::cout << "\n";
                 #endif
 
-                if (payload.server_id < 0 || payload.server_id >= node_ids_.bits()) {
+                if (payload.server_id < 0 || payload.server_id >= node_ids_.bits()) [[unlikely]] {
                     return {};
                 }
 
-                if (payload.term > current_term_) { // this shouldn't happen
+                if (payload.term > current_term_) [[unlikely]] { // this shouldn't happen
                     advance_to_term(payload.term);
                     // leader_id_ = payload.server_id;
                     // leader_contact = true;
@@ -416,14 +416,6 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                     commit_entries_if_available();
                     return {};
                 }
-
-                // const size_t prev_log_idx_offset = payload.prev_log_idx < base_logical_idx_ ? 0 : payload.prev_log_idx - base_logical_idx_;
-                // if (payload.prev_log_idx != base_logical_idx_ - 1 && prev_log_idx_offset >= log_.size()) {
-                //     return (std::format(
-                //         "Failed to process AE reply: prev_log_idx offset {} out of bounds (log size = {})",
-                //         prev_log_idx_offset, log_.size()
-                //     ));
-                // }
 
                 const uint32_t last_log_idx = static_cast<uint32_t>(log_.size() - 1) + base_logical_idx_;
                 if (payload.prev_log_idx < 1 || payload.prev_log_idx > last_log_idx) {
@@ -439,7 +431,7 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                 if (payload.prev_log_idx < base_logical_idx_) {
                     installing_snapshot_.set(payload.server_id);
                     std::optional<std::string> send_is_err = send_install_snapshot(el, payload.server_id);
-                    if (send_is_err) {
+                    if (send_is_err) [[unlikely]] {
                         return (std::format(
                             "error retrying IS RPC:\n{}\n",
                             send_is_err.value()
@@ -496,7 +488,7 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                 std::cout << "found IS reply from node " << payload.server_id << "\n";
                 std::cout << "payload.term = " << payload.term << "\n";
                 #endif
-                if (payload.server_id < 0 || payload.server_id >= node_ids_.bits()) {
+                if (payload.server_id < 0 || payload.server_id >= node_ids_.bits()) [[unlikely]] {
                     return {};
                 }
 
@@ -578,7 +570,7 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                 if (state_ != NodeState::Leader || !node_ids_.is_available(payload.source_id)) return {};
                 auto& el = loops_[get_loop_idx(payload.source_id)];
                 const int32_t next_idx = next_indexes_[payload.source_id];
-                if (next_idx == 0) {
+                if (next_idx == 0) [[unlikely]] {
                     return (std::format(
                         "Failed to process HeartbeatTimeout: next_index 0 for node id {} cannot derive prev_log_idx",
                         payload.source_id
@@ -588,7 +580,7 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                 if (next_idx < base_logical_idx_) {
                     installing_snapshot_.set(payload.source_id);
                     std::optional<std::string> send_is_err = send_install_snapshot(el, payload.source_id);
-                    if (send_is_err) {
+                    if (send_is_err) [[unlikely]] {
                         return (std::format(
                             "error retrying IS RPC:\n{}\n",
                             send_is_err.value()
@@ -598,7 +590,7 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                 }
 
                 std::optional<std::string> send_ae_err = send_append_entries(next_idx, el, payload.source_id);
-                if (send_ae_err) {
+                if (send_ae_err) [[unlikely]] {
                     return (std::format(
                         "error retrying AE RPC:\n{}\n",
                         send_ae_err.value()
@@ -628,7 +620,7 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
 
                 auto& el = loops_[get_loop_idx(payload.source_id)];
                 std::optional<std::string> send_is_err = send_install_snapshot(el, payload.source_id);
-                if (send_is_err) {
+                if (send_is_err) [[unlikely]] {
                     return (std::format(
                         "error retrying IS RPC:\n{}\n",
                         send_is_err.value()
@@ -681,7 +673,7 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                 std::optional<std::string> err = reconstruct_state(payload.fp, commit_index_);
                 if (err) [[unlikely]] {
                     #ifdef DEBUG
-                    std::cout << "reconstructed state\n";
+                    std::cout << "error reconstructing state\n";
                     #endif
                     return err;
                 }
@@ -719,7 +711,7 @@ inline std::optional<std::string> Node<A,C,R>::OnElectionTimeout() {
     for (int i = 0; i < MAX_TIMER_RETRIES; ++i) {
         uint64_t expirations = 0;
         ssize_t n = ::read(election_timeout_fd_, &expirations, sizeof(expirations));
-        if (n == -1) {
+        if (n == -1) [[unlikely]] {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 return "error reading election timeout fd\n";
             }
@@ -729,7 +721,7 @@ inline std::optional<std::string> Node<A,C,R>::OnElectionTimeout() {
             }
             return "unexpected error on election timeout fd read\n"; // some other error
         }
-        else if (n != sizeof(expirations)) {
+        else if (n != sizeof(expirations)) [[unlikely]] {
             // short read (not typical)
             return {};
         }
@@ -745,7 +737,7 @@ inline std::optional<std::string> Node<A,C,R>::OnElectionTimeout() {
 
 template <ApplyFunc A, OnCommitCallback C, OnReadStateCallback R>
 inline std::optional<std::string> Node<A,C,R>::OnHeartbeat() {
-    if (node_ids_.num_available != 0) {
+    if (node_ids_.num_available != 0) [[likely]] {
         #ifdef DEBUG
         std::cout << "last_applied_idx_ = " << last_applied_idx_ << "\n";
         std::cout << "base_logical_idx_ = " << base_logical_idx_ << "\n";
@@ -758,7 +750,7 @@ inline std::optional<std::string> Node<A,C,R>::OnHeartbeat() {
             #endif
             auto& el = loops_[get_loop_idx(id)];
             const int32_t next_idx = next_indexes_[id];
-            if (next_idx == 0) {
+            if (next_idx == 0) [[unlikely]] {
                 err = (std::format(
                     "Failed to process HeartbeatTimeout: next_index 0 for node id {} cannot derive prev_log_idx",
                     id
@@ -796,7 +788,7 @@ inline std::optional<std::string> Node<A,C,R>::OnHeartbeat() {
     for (int i = 0; i < MAX_TIMER_RETRIES; ++i) {
         uint64_t expirations = 0;
         ssize_t n = ::read(heartbeat_fd_, &expirations, sizeof(expirations));
-        if (n == -1) {
+        if (n == -1) [[unlikely]] {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 return "error attempting to read heartbeat fd\n";
             }
@@ -806,7 +798,7 @@ inline std::optional<std::string> Node<A,C,R>::OnHeartbeat() {
             }
             return "unexpected error on heartbeat fd read\n"; // some other error
         }
-        else if (n != sizeof(expirations)) {
+        else if (n != sizeof(expirations)) [[unlikely]] {
             // short read (not typical)
             return {};
         }
@@ -821,13 +813,13 @@ inline std::optional<std::string> Node<A,C,R>::OnFlush() {
     #ifdef DEBUG
     std::cout << "flushing files...\n";
     #endif
-    if (log_fp_) { ::fflush(log_fp_); ::fsync(fileno(log_fp_)); }
-    if (snapshot_fp_) { ::fflush(snapshot_fp_); ::fsync(fileno(snapshot_fp_)); }
+    if (log_fp_) [[likely]] { ::fflush(log_fp_); ::fsync(fileno(log_fp_)); }
+    if (snapshot_fp_) [[likely]] { ::fflush(snapshot_fp_); ::fsync(fileno(snapshot_fp_)); }
 
     for (int i = 0; i < MAX_TIMER_RETRIES; ++i) {
         uint64_t expirations = 0;
         ssize_t n = ::read(flush_fd_, &expirations, sizeof(expirations));
-        if (n == -1) {
+        if (n == -1) [[unlikely]] {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 return "error attempting to read flush fd\n";
             }
@@ -837,7 +829,7 @@ inline std::optional<std::string> Node<A,C,R>::OnFlush() {
             }
             return "unexpected error on flush fd read\n"; // some other error
         }
-        else if (n != sizeof(expirations)) {
+        else if (n != sizeof(expirations)) [[unlikely]] {
             // short read (not typical)
             return {};
         }
@@ -854,7 +846,7 @@ inline std::optional<std::string> Node<A,C,R>::MainLoop() {
     while (running_) {
         int n = ::epoll_wait(epoll_fd_, evs, 4, -1);
 
-        if (n < 0) {
+        if (n < 0) [[unlikely]] {
             if (errno == EINTR) continue;
             return ("epoll_wait failed");
         }
