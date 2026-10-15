@@ -290,6 +290,7 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                 std::cout << "payload.offset = " << payload.offset << "\n";
                 std::cout << "payload.leader_id = " << payload.leader_id << "\n";
                 std::cout << "payload.done = " << static_cast<int>(payload.done) << "\n";
+                print_cluster();
                 #endif
                 IPAddr ip_addr = (payload.client_ip_addr >> 16) & 0xFFFFFFFF;
                 auto& el = loops_[get_loop_idx(payload.leader_id)];
