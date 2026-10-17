@@ -1,4 +1,5 @@
 #pragma once
+#include <cstring>
 #include <new>
 #define DEBUG
 #include <array>
@@ -12,9 +13,9 @@
 static constexpr int BASE_CLUSTER_SIZE = 3;
 
 static constexpr std::string INIT_CLUSTER[BASE_CLUSTER_SIZE] = {
-    "68.183.202.86",
-    "68.183.202.86",
-    "68.183.202.86",
+    "172.26.0.10",
+    "172.26.0.11",
+    "172.26.0.12",
 };
 
 static constexpr size_t MAX_NODES = 8; // the maximum number of nodes in the cluster that can be accomodated (used for writing cluster data to snapshot/state files)
@@ -68,11 +69,9 @@ static constexpr uint64_t FLUSH_INTERVAL_NS = FLUSH_INTERVAL_MS * 1000000;
 
 static constexpr int MAX_TIMER_RETRIES = 4;
 
-static constexpr const char* LOG_FILE_PATH = "/root/raft/persistence/log";
-static constexpr const char* SNAPSHOT_FILE_PATH = "/root/raft/persistence/snapshot";
-static constexpr const char* SNAPSHOT_TMP_FILE_PATH = "/root/raft/persistence/snapshot_tmp";
-static constexpr const char* STATE_MACHINE_FILE_PATH = "/root/raft/persistence/state";
-static constexpr const char* STATE_MACHINE_TMP_FILE_PATH = "/root/raft/persistence/state_tmp";
+static constexpr const char LOG_FILE_PATH[] = "/raft/persistence/log";
+static constexpr const char SNAPSHOT_FILE_PATH[] = "/raft/persistence/snapshot";
+static constexpr const char STATE_MACHINE_FILE_PATH[] = "/raft/persistence/state";
 
 /* Don't change this */
 static constexpr int BITS_PER_BYTE = 8;
@@ -130,4 +129,45 @@ constexpr std::array<IPAddr, BASE_CLUSTER_SIZE> get_addrs() {
     }
     return addrs;
 }
+
+template <size_t N>
+struct FixedString {
+  char data[N]{};
+
+  constexpr FixedString() = default;
+  constexpr FixedString(const char (&str)[N]) {
+      for (size_t i = 0; i < N; ++i) {
+          data[i] = str[i];
+      }
+  }
+
+  constexpr std::size_t size() const {
+      return N - 1; // Exclude null terminator
+  }
+
+  constexpr operator std::string_view() const {
+      return {data, size()};
+  }
+
+};
+
+template <size_t N, size_t M>
+constexpr auto operator+(const FixedString<N>& a, const FixedString<M>& b) {
+    FixedString<N + M - 1> res{};
+    for (size_t i = 0; i < N-1; ++i) {
+        res.data[i] = a.data[i];
+    }
+    for (size_t i = 0; i < M; ++i) {
+        res.data[N - 1 + i] = b.data[i];
+    }
+    return res;
+}
+
+static constexpr FixedString state_tmp_path = FixedString(STATE_MACHINE_FILE_PATH);
+static constexpr auto sm_tmp = state_tmp_path + FixedString{".tmp"};
+static constexpr const char* STATE_MACHINE_TMP_FILE_PATH = sm_tmp.data;
+
+static constexpr FixedString snapshot_tmp_path = FixedString(SNAPSHOT_FILE_PATH);
+static constexpr auto snapshot_tmp = snapshot_tmp_path + FixedString{".tmp"};
+static constexpr const char* SNAPSHOT_TMP_FILE_PATH = snapshot_tmp.data;
 /* ----------------- */

@@ -97,6 +97,6 @@ The following parameters can optionally be tuned for your system or for potentia
 
 - `FLUSH_INTERVAL_MS` - the period (in milliseconds) for which the log file and snapshot file should be fflushed and fsynced to disk. Longer intervals incur less performance overhead at the cost of potential data loss in the event that a node crashes. Shorter intervals incur more latency, but have less potential for data loss. Recommended to be >= 1000.
 
-- `{LOG, SNAPSHOT, SNAPSHOT_TMP, STATE_MACHINE, STATE_MACHINE_TMP}_FILE_PATH` - file paths for the relevant files for persistence and replication. This includes temporary files that are used for atomic renames.
+- `{LOG, SNAPSHOT, STATE_MACHINE}_FILE_PATH` - file paths for the relevant files for persistence and replication.
 
 ## Usage
