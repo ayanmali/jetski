@@ -965,9 +965,6 @@ inline std::optional<std::string> Node<A,C,R>::send_install_snapshot(EventLoop<S
     }
 
     const uint8_t done = (chunks_sent_[dest_id] + 1) * SNAPSHOT_CHUNK_SIZE > snapshot_stat.st_size;
-    #ifdef DEBUG
-    std::cout << "done = " << static_cast<int>(done) << "\n";
-    #endif
 
     auto p = InstallSnapshotReqPayload {
         .data_len = done ? snapshot_stat.st_size - (chunks_sent_[dest_id] * SNAPSHOT_CHUNK_SIZE) : SNAPSHOT_CHUNK_SIZE,
@@ -982,6 +979,19 @@ inline std::optional<std::string> Node<A,C,R>::send_install_snapshot(EventLoop<S
 
     ::fseek(snapshot_fp_, p.offset, SEEK_SET);
     ::fread(p.partial_state, p.data_len, 1, snapshot_fp_); // TODO: error handling
+
+    #ifdef DEBUG
+    std::cout << "done = " << static_cast<int>(done) << "\n";
+    std::cout << "data_len = " << p.data_len << "\n";
+    std::cout << "last included idx = " << p.last_included_idx << "\n";
+    std::cout << "last included term = " << p.last_included_term << "\n";
+    std::cout << "offset = " << p.offset << "\n";
+    std::cout << "partial state data:\n";
+    for (std::byte b : p.partial_state) {
+        std::cout << static_cast<int>(b) << ", ";
+    }
+    std::cout << "\n";
+    #endif
 
     send(std::move(p), el);
     return {};
