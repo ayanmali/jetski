@@ -330,7 +330,6 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                     .server_id = MY_ID,
                     .term = current_term_}, el);
 
-                // for the first snapshot chunk, the cluster data is given at the start, after the last_included_idx and last_included_term
                 if (payload.offset == 0) {
                     if (snapshot_tmp_fp_ != nullptr) {
                         ::fclose(snapshot_tmp_fp_);
@@ -339,15 +338,6 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                     if (snapshot_tmp_fp_ == NULL) return (
                         "error in InstallSnapshotRPC handler; failed to open snapshot tmp file\n"
                     );
-                    size_t cluster_size;
-                    std::memcpy(&cluster_size, payload.partial_state + snapshot_config_and_data_offset_bytes(), sizeof(cluster_size));
-                    node_ids_.reset_cluster(payload.partial_state + snapshot_config_and_data_offset_bytes() + sizeof(cluster_size), cluster_size);
-                    node_ids_.set_unavailable_node(MY_ID);
-
-                    #ifdef DEBUG
-                    std::cout << "new cluster configuration after snapshot first chunk:\n";
-                    print_cluster();
-                    #endif
                 }
 
                 // write data into snapshot file at given offset
@@ -365,6 +355,7 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
 
                 snapshot_fp_ = ::fopen(SNAPSHOT_FILE_PATH, "r+");
 
+                // note: last included idx/term is included in the snapshot file bytes as well as the payload itself
                 if (payload.last_included_idx > last_applied_idx_) {
                     const size_t offset = payload.last_included_idx - base_logical_idx_;
                     if (offset < log_.size() && log_[offset].term == payload.last_included_term) {
@@ -389,6 +380,18 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                 last_applied_term_ = payload.last_included_term;
                 base_logical_idx_ = payload.last_included_idx + 1;
                 base_term_ = payload.last_included_term;
+
+                size_t cluster_size;
+                ::fseek(snapshot_fp_, snapshot_config_and_data_offset_bytes(), SEEK_SET);
+                ::fread(&cluster_size, sizeof(cluster_size), 1, snapshot_fp_);
+                node_ids_.reset_cluster(snapshot_fp_, cluster_size);
+                node_ids_.set_unavailable_node(MY_ID);
+                ::rewind(snapshot_fp_);
+
+                #ifdef DEBUG
+                std::cout << "new cluster configuration after snapshot first chunk:\n";
+                print_cluster();
+                #endif
                 return {};
             }
 
