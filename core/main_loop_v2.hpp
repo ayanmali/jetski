@@ -284,12 +284,20 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
             else if constexpr (std::is_same_v<T, InstallSnapshotReqPayload>) {
                 #ifdef DEBUG
                 std::cout << "found IS RPC from node " << payload.leader_id << "\n";
+                std::cout << "last applied idx = " << last_applied_idx_ << "\n";
+                std::cout << "current term = " << current_term_ << "\n";
                 std::cout << "payload.term = " << payload.term << "\n";
                 std::cout << "payload.last_included_idx = " << payload.last_included_idx << "\n";
                 std::cout << "payload.last_included_term = " << payload.last_included_term << "\n";
                 std::cout << "payload.offset = " << payload.offset << "\n";
                 std::cout << "payload.leader_id = " << payload.leader_id << "\n";
                 std::cout << "payload.done = " << static_cast<int>(payload.done) << "\n";
+                std::cout << "payload.data_len = " << payload.data_len << "\n";
+                std::cout << "payload partial state bytes:\n";
+                for (std::byte b : payload.partial_state) {
+                    std::cout << static_cast<int>(b) << ", ";
+                }
+                std::cout << "\n";
                 print_cluster();
                 #endif
                 IPAddr ip_addr = (payload.client_ip_addr >> 16) & 0xFFFFFFFF;
@@ -335,6 +343,11 @@ inline std::optional<std::string> Node<A,C,R>::OnWake(bool& __restrict leader_co
                     std::memcpy(&cluster_size, payload.partial_state + snapshot_config_and_data_offset_bytes(), sizeof(cluster_size));
                     node_ids_.reset_cluster(payload.partial_state + snapshot_config_and_data_offset_bytes() + sizeof(cluster_size), cluster_size);
                     node_ids_.set_unavailable_node(MY_ID);
+
+                    #ifdef DEBUG
+                    std::cout << "new cluster configuration after snapshot first chunk:\n";
+                    print_cluster();
+                    #endif
                 }
 
                 // write data into snapshot file at given offset
