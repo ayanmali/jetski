@@ -12,11 +12,20 @@ int main() {
         ::fwrite(&num, sizeof(num), 1, state_machine_fp);
     };
 
-    auto on_commit = [](std::span<LogEntry>, int){
-        std::cout << "on commit callback\n";
+    auto on_commit = [](std::span<LogEntry> entries, int idx){
+        std::cout << "on commit callback - index = " << idx << "\n";
+        std::cout << "committed entries:\n";
+        for (auto e : entries) {
+            std::cout << "term = " << e.term << ", ";
+            std::cout << "data = {";
+            for (std::byte b : e.data_) {
+                std::cout << static_cast<int>(b) << ", ";
+            }
+            std::cout << "}\n";
+        }
     };
-    auto on_read = [](FILE*, int){
-        std::cout << "on read callback\n";
+    auto on_read = [](FILE*, int idx){
+        std::cout << "on read callback - index = " << idx << "\n";
     };
 
     using Client = RaftClient<decltype(apply_func), decltype(on_commit), decltype(on_read)>;
