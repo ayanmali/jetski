@@ -1,8 +1,9 @@
 #include "../rpc/event_loop/event_loop.hpp"
 #include "../client/client.hpp"
+#include <cstdio>
 #include <thread>
-
 #include <iostream>
+
 int main() {
     std::cout << "Testing RPC correctness\n";
     auto apply_func = [](FILE* state_machine_fp, const LogEntry& entry) {
@@ -11,8 +12,12 @@ int main() {
         ::fwrite(&num, sizeof(num), 1, state_machine_fp);
     };
 
-    auto on_commit = [](std::span<LogEntry>, int){};
-    auto on_read = [](FILE*, int){};
+    auto on_commit = [](std::span<LogEntry>, int){
+        std::cout << "on commit callback\n";
+    };
+    auto on_read = [](FILE*, int){
+        std::cout << "on read callback\n";
+    };
 
     using Client = RaftClient<decltype(apply_func), decltype(on_commit), decltype(on_read)>;
     Client c{};
@@ -37,6 +42,13 @@ int main() {
     c.Start();
     c.AppendCommands(data);
     std::this_thread::sleep_for(std::chrono::seconds(15));
+    FILE* read_state = ::fopen("read_state.txt", "w+");
+    if (read_state == nullptr) {
+        c.Stop();
+        std::cout << "Test Failed - failed to open file for storing read state\n";
+    }
+    std::this_thread::sleep_for(std::chrono::seconds(10));
+    c.ReadState(read_state);
     c.Stop();
 
     std::cout << "Test Passed\n";
